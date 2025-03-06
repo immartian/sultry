@@ -23,32 +23,35 @@ Sultry employs a dual-component architecture:
 
 ### Architectural Diagram
 
-```
-                                          ┌─────────────────────────────────────────────────────────┐
-                                          │                Sultry Proxy System                      │
-                                          └─────────────────────────────────────────────────────────┘
-                                                                   │
-                                                                   ▼
-┌──────────────┐        ┌───────────────────┐        ┌───────────────────────────────────┐        ┌────────────────┐
-│              │        │                   │        │                                   │        │                │
-│              │ HTTP/  │  ┌──────────────┐ │        │ ┌─────────────────┐ ┌──────────┐ │        │                │
-│    Client    ◄────────┼─►│Client Component│◄────────┼─┤      Network    │ │Firewall/│◄┼────────►  Target Server │
-│  (Browser/   │ HTTPS  │  │  (client.go)  │ │        │ │     Censor     │ │  DPI    │ │ TCP/TLS │   (Website)    │
-│    curl)     │ Proxy  │  └────────┬─────┬┘ │        │ └──────┬─────────┘ └────┬────┘ │        │                │
-│              │Protocol│           │     │   │        │        │                │      │        │                │
-└──────────────┘        └───────────┼─────┼───┘        └────────┼────────────────┼──────┘        └────────────────┘
-                                    │     │                     │                │
-                                    │     └─────────────────────┼────────────────┘
-                                    │            Direct TLS      │              
-                                    │       (Application Data)   │              
-                                    │                            │              
-                                    │                            │
-                                    │     OOB SNI Resolution     │
-                                    └───────────────────────────►┘
-                                                         ┌──────────────┐
-                                                         │Server Component│
-                                                         │  (server.go)  │
-                                                         └──────────────┘
+```mermaid
+flowchart LR
+    subgraph Clients
+        C[Client\nBrowser/curl]
+    end
+    
+    subgraph SultryProxySystem
+        CC[Client Component\nclient.go]
+        SC[Server Component\nserver.go]
+    end
+    
+    subgraph Network
+        NW[Network\nCensor]
+        FW[Firewall/\nDPI]
+    end
+    
+    subgraph Targets
+        TS[Target Server\nWebsite]
+    end
+    
+    C <-->|HTTP/HTTPS\nProxy Protocol| CC
+    CC -->|OOB SNI\nResolution| SC
+    CC -.->|Direct TLS\nApplication Data| NW
+    NW --- FW
+    FW <-->|TCP/TLS| TS
+    
+    style CC fill:#f9f,stroke:#333,stroke-width:1px
+    style SC fill:#f9f,stroke:#333,stroke-width:1px
+    style FW fill:#ff9,stroke:#333,stroke-width:1px
 ```
 
 ### Distributed Connection Model
@@ -141,51 +144,25 @@ curl -x http://127.0.0.1:7008 https://example.com/
 
 ### SNI Concealment Process
 
-```
-┌───────────┐                    ┌───────────────┐                   ┌────────────┐               ┌────────────┐
-│           │                    │               │                   │            │               │            │
-│   Client  │                    │Client Component│                   │Server Comp.│               │Target Server│
-│           │                    │               │                   │            │               │            │
-└─────┬─────┘                    └───────┬───────┘                   └──────┬─────┘               └──────┬─────┘
-      │                                  │                                  │                            │
-      │   1. HTTP CONNECT Request        │                                  │                            │
-      │ ──────────────────────────────────>                                  │                            │
-      │                                  │                                  │                            │
-      │   2. 200 Connection Established  │                                  │                            │
-      │ <──────────────────────────────────                                  │                            │
-      │                                  │                                  │                            │
-      │   3. TLS ClientHello (with SNI)  │                                  │                            │
-      │ ──────────────────────────────────>                                  │                            │
-      │                                  │                                  │                            │
-      │                                  │  4. OOB: Extract & Send SNI only │                            │
-      │                                  │ ─────────────────────────────────>                            │
-      │                                  │                                  │                            │
-      │                                  │                                  │  5. DNS Resolution         │
-      │                                  │                                  │ ──────────────────────────┐│
-      │                                  │                                  │                           ││
-      │                                  │                                  │ <──────────────────────────┘
-      │                                  │                                  │                            │
-      │                                  │  6. Return IP for hostname       │                            │
-      │                                  │ <─────────────────────────────────                            │
-      │                                  │                                  │                            │
-      │                                  │  7. Direct TCP Connect to IP     │                            │
-      │                                  │ ──────────────────────────────────────────────────────────────>
-      │                                  │  (bypasses SNI filtering)        │                            │
-      │                                  │                                  │                            │
-      │   8. Forward ClientHello         │                                  │                            │
-      │ ──────────────────────────────────────────────────────────────────────────────────────────────────>
-      │                                  │                                  │                            │
-      │   9. TLS ServerHello             │                                  │                            │
-      │ <──────────────────────────────────────────────────────────────────────────────────────────────────
-      │                                  │                                  │                            │
-      │        TLS Handshake Completes   │                                  │                            │
-      │                                  │                                  │                            │
-      │   10. Application Data (Direct)  │                                  │                            │
-      │ ──────────────────────────────────────────────────────────────────────────────────────────────────>
-      │                                  │                                  │                            │
-      │   11. HTTP Response (Direct)     │                                  │                            │
-      │ <──────────────────────────────────────────────────────────────────────────────────────────────────
-      │                                  │                                  │                            │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CC as Client Component
+    participant SC as Server Component
+    participant TS as Target Server
+    
+    C->>CC: 1. HTTP CONNECT Request
+    CC->>C: 2. 200 Connection Established
+    C->>CC: 3. TLS ClientHello (with SNI)
+    CC->>SC: 4. OOB: Extract & Send SNI only
+    SC->>SC: 5. DNS Resolution
+    SC->>CC: 6. Return IP for hostname
+    CC->>TS: 7. Direct TCP Connect to IP<br/>(bypasses SNI filtering)
+    C->>TS: 8. Forward ClientHello
+    TS->>C: 9. TLS ServerHello
+    Note over C,TS: TLS Handshake Completes
+    C->>TS: 10. Application Data (Direct)
+    TS->>C: 11. HTTP Response (Direct)
 ```
 
 1. **Client Side**:
