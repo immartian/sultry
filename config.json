@@ -1,0 +1,25 @@
+{
+    "local_proxy_addr": "127.0.0.1:7008",
+    "relay_port": 9008,
+    "oob_channels": [
+      {
+        "type": "http",
+        "address": "127.0.0.1", 
+        "port": 9008
+      },
+        {
+          "type": "http",
+          "address": "192.168.2.24", 
+          "port": 9008
+        },
+        {
+          "type": "quic",
+          "address": "5.6.7.8", 
+          "port": 9008
+        }
+      ],
+    "cover_sni": "harvard.edu",
+    "prioritize_sni_concealment": true,
+    "handshake_timeout": 10000
+  }
+  
