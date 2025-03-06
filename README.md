@@ -41,17 +41,22 @@ flowchart LR
     
     subgraph Targets
         TS[Target Server\nWebsite]
+        DNS[DNS Servers]
     end
     
     C <-->|HTTP/HTTPS\nProxy Protocol| CC
-    CC -->|OOB SNI\nResolution| SC
-    CC -.->|Direct TLS\nApplication Data| NW
+    CC -->|OOB: SNI Hostname| SC
+    SC -->|DNS Resolution| DNS
+    DNS -->|IP Address| SC
+    SC -->|Return Target IP| CC
+    CC -.->|Direct TLS Connection\nto IP (bypasses SNI filtering)| NW
     NW --- FW
     FW <-->|TCP/TLS| TS
     
     style CC fill:#f9f,stroke:#333,stroke-width:1px
     style SC fill:#f9f,stroke:#333,stroke-width:1px
     style FW fill:#ff9,stroke:#333,stroke-width:1px
+    style DNS fill:#9cf,stroke:#333,stroke-width:1px
 ```
 
 ### Distributed Connection Model
