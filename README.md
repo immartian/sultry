@@ -44,12 +44,12 @@ flowchart LR
         DNS[DNS Servers]
     end
     
-    C <-->|HTTP/HTTPS\nProxy Protocol| CC
+    C <-->|HTTP/HTTPS Proxy Protocol| CC
     CC -->|OOB: SNI Hostname| SC
     SC -->|DNS Resolution| DNS
     DNS -->|IP Address| SC
     SC -->|Return Target IP| CC
-    CC -.->|Direct TLS Connection\nto IP (bypasses SNI filtering)| NW
+    CC -.->|Direct TLS Connection| NW
     NW --- FW
     FW <-->|TCP/TLS| TS
     
@@ -162,7 +162,7 @@ sequenceDiagram
     CC->>SC: 4. OOB: Extract & Send SNI only
     SC->>SC: 5. DNS Resolution
     SC->>CC: 6. Return IP for hostname
-    CC->>TS: 7. Direct TCP Connect to IP<br/>(bypasses SNI filtering)
+    CC->>TS: 7. Direct TCP Connect to IP
     C->>TS: 8. Forward ClientHello
     TS->>C: 9. TLS ServerHello
     Note over C,TS: TLS Handshake Completes
