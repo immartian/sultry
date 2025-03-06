@@ -24,23 +24,31 @@ Sultry employs a dual-component architecture:
 ### Architectural Diagram
 
 ```
-                           ┌─────────────────────────────────────────────┐
-                           │             Sultry Proxy                    │
-                           └─────────────────────────────────────────────┘
-                                               │
-                                               ▼
-┌──────────────┐          ┌───────────────────────────────────────┐          ┌────────────────┐
-│              │          │                                       │          │                │
-│              │  HTTP/   │ ┌─────────────────┐ ┌──────────────┐  │          │                │
-│    Client    ◄─────────►│ │ Client Component│ │Server Component│  │◄────────►  Target Server │
-│  (Browser/   │  HTTPS   │ │   (client.go)   │ │  (server.go)  │  │  TCP/TLS │   (Website)    │
-│    curl)     │  Proxy   │ └─────────┬───────┘ └──────┬───────┘  │          │                │
-│              │ Protocol │           │                │          │          │                │
-└──────────────┘          └───────────┼────────────────┼──────────┘          └────────────────┘
-                                      │                │
-                                      │ OOB SNI Only   │
-                                      └───────────────►┘
-                                      Minimal Metadata Exchange
+                                          ┌─────────────────────────────────────────────────────────┐
+                                          │                Sultry Proxy System                      │
+                                          └─────────────────────────────────────────────────────────┘
+                                                                   │
+                                                                   ▼
+┌──────────────┐        ┌───────────────────┐        ┌───────────────────────────────────┐        ┌────────────────┐
+│              │        │                   │        │                                   │        │                │
+│              │ HTTP/  │  ┌──────────────┐ │        │ ┌─────────────────┐ ┌──────────┐ │        │                │
+│    Client    ◄────────┼─►│Client Component│◄────────┼─┤      Network    │ │Firewall/│◄┼────────►  Target Server │
+│  (Browser/   │ HTTPS  │  │  (client.go)  │ │        │ │     Censor     │ │  DPI    │ │ TCP/TLS │   (Website)    │
+│    curl)     │ Proxy  │  └────────┬─────┬┘ │        │ └──────┬─────────┘ └────┬────┘ │        │                │
+│              │Protocol│           │     │   │        │        │                │      │        │                │
+└──────────────┘        └───────────┼─────┼───┘        └────────┼────────────────┼──────┘        └────────────────┘
+                                    │     │                     │                │
+                                    │     └─────────────────────┼────────────────┘
+                                    │            Direct TLS      │              
+                                    │       (Application Data)   │              
+                                    │                            │              
+                                    │                            │
+                                    │     OOB SNI Resolution     │
+                                    └───────────────────────────►┘
+                                                         ┌──────────────┐
+                                                         │Server Component│
+                                                         │  (server.go)  │
+                                                         └──────────────┘
 ```
 
 ### Distributed Connection Model
@@ -133,6 +141,53 @@ curl -x http://127.0.0.1:7008 https://example.com/
 
 ### SNI Concealment Process
 
+```
+┌───────────┐                    ┌───────────────┐                   ┌────────────┐               ┌────────────┐
+│           │                    │               │                   │            │               │            │
+│   Client  │                    │Client Component│                   │Server Comp.│               │Target Server│
+│           │                    │               │                   │            │               │            │
+└─────┬─────┘                    └───────┬───────┘                   └──────┬─────┘               └──────┬─────┘
+      │                                  │                                  │                            │
+      │   1. HTTP CONNECT Request        │                                  │                            │
+      │ ──────────────────────────────────>                                  │                            │
+      │                                  │                                  │                            │
+      │   2. 200 Connection Established  │                                  │                            │
+      │ <──────────────────────────────────                                  │                            │
+      │                                  │                                  │                            │
+      │   3. TLS ClientHello (with SNI)  │                                  │                            │
+      │ ──────────────────────────────────>                                  │                            │
+      │                                  │                                  │                            │
+      │                                  │  4. OOB: Extract & Send SNI only │                            │
+      │                                  │ ─────────────────────────────────>                            │
+      │                                  │                                  │                            │
+      │                                  │                                  │  5. DNS Resolution         │
+      │                                  │                                  │ ──────────────────────────┐│
+      │                                  │                                  │                           ││
+      │                                  │                                  │ <──────────────────────────┘
+      │                                  │                                  │                            │
+      │                                  │  6. Return IP for hostname       │                            │
+      │                                  │ <─────────────────────────────────                            │
+      │                                  │                                  │                            │
+      │                                  │  7. Direct TCP Connect to IP     │                            │
+      │                                  │ ──────────────────────────────────────────────────────────────>
+      │                                  │  (bypasses SNI filtering)        │                            │
+      │                                  │                                  │                            │
+      │   8. Forward ClientHello         │                                  │                            │
+      │ ──────────────────────────────────────────────────────────────────────────────────────────────────>
+      │                                  │                                  │                            │
+      │   9. TLS ServerHello             │                                  │                            │
+      │ <──────────────────────────────────────────────────────────────────────────────────────────────────
+      │                                  │                                  │                            │
+      │        TLS Handshake Completes   │                                  │                            │
+      │                                  │                                  │                            │
+      │   10. Application Data (Direct)  │                                  │                            │
+      │ ──────────────────────────────────────────────────────────────────────────────────────────────────>
+      │                                  │                                  │                            │
+      │   11. HTTP Response (Direct)     │                                  │                            │
+      │ <──────────────────────────────────────────────────────────────────────────────────────────────────
+      │                                  │                                  │                            │
+```
+
 1. **Client Side**:
    - Extracts SNI metadata from TLS ClientHello
    - Sends only the SNI hostname to the server via OOB channel
@@ -146,7 +201,7 @@ curl -x http://127.0.0.1:7008 https://example.com/
    - Returns IP information to client
    - No involvement in the actual TLS handshake or data exchange
 
-This approach maintains full TLS integrity while completely hiding the SNI information from network monitors.
+This approach maintains full TLS integrity while completely hiding the SNI information from network monitors that may be filtering based on domain names.
 
 ### OOB Channel Flexibility
 
