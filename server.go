@@ -52,6 +52,11 @@ var (
 )
 
 func server(config *Config) {
+	// Configure more verbose logging
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
+	log.Println("🚀 Starting Sultry server component...")
+	log.Println("📝 Configuration:", fmt.Sprintf("%+v", *config))
+
 	// Set up HTTP handlers for different endpoints
 	http.HandleFunc("/", legacyServe)              // Legacy endpoint for backward compatibility
 	http.HandleFunc("/handshake", handleHandshake) // New endpoint for handshake messages
@@ -64,10 +69,24 @@ func server(config *Config) {
 	http.HandleFunc("/send_data", handleSendData)                   // New endpoint for sending client data
 	http.HandleFunc("/create_connection", handleCreateConnection)   // New endpoint for simplified SNI concealment
 
+	// Log all registered routes
+	log.Println("📌 Registered HTTP handlers:")
+	log.Println("   - /                   (Legacy endpoint)")
+	log.Println("   - /handshake          (Handshake message handler)")
+	log.Println("   - /appdata            (Application data handler)")
+	log.Println("   - /complete_handshake (Handshake completion handler)")
+	log.Println("   - /adopt_connection   (Connection adoption handler)")
+	log.Println("   - /get_target_info    (Target info handler)")
+	log.Println("   - /release_connection (Connection release handler)")
+	log.Println("   - /get_response       (Response retrieval handler)")
+	log.Println("   - /send_data          (Data sending handler)")
+	log.Println("   - /create_connection  (SNI resolution handler)")
+
 	// Start cleanup goroutine
 	go cleanupInactiveSessions()
 
 	log.Println("🔹 TLS Relay service listening on port", config.RelayPort)
+	log.Println("✅ Server ready to accept connections")
 	log.Fatal(http.ListenAndServe(":"+fmt.Sprint(config.RelayPort), nil))
 }
 
@@ -1405,6 +1424,8 @@ func handleSendData(w http.ResponseWriter, r *http.Request) {
 // without TLS record manipulation. It takes a host:port from the client,
 // creates a connection to that target, and returns the real IP and port.
 func handleCreateConnection(w http.ResponseWriter, r *http.Request) {
+	log.Println("📣 RECEIVED SNI RESOLUTION REQUEST")
+	
 	var req struct {
 		SessionID string `json:"session_id"`
 		SNI       string `json:"sni"`
@@ -1412,11 +1433,18 @@ func handleCreateConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("❌ SNI RESOLUTION ERROR: Invalid request: %v", err)
 		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
 		return
 	}
 	
+	log.Printf("📝 SNI RESOLUTION REQUEST DETAILS:")
+	log.Printf("   Session ID: %s", req.SessionID)
+	log.Printf("   SNI Value: %s", req.SNI)
+	log.Printf("   Port: %s", req.Port)
+	
 	if req.SessionID == "" || req.SNI == "" {
+		log.Printf("❌ SNI RESOLUTION ERROR: Missing SessionID or SNI")
 		http.Error(w, "Session ID and SNI are required", http.StatusBadRequest)
 		return
 	}
@@ -1425,9 +1453,10 @@ func handleCreateConnection(w http.ResponseWriter, r *http.Request) {
 	port := req.Port
 	if port == "" {
 		port = "443"
+		log.Printf("ℹ️ Using default port 443")
 	}
 	
-	log.Printf("🔹 Creating connection to %s:%s for SNI concealment", req.SNI, port)
+	log.Printf("🔹 CREATING CONNECTION TO %s:%s FOR SNI CONCEALMENT", req.SNI, port)
 	
 	// Establish connection to target
 	target := fmt.Sprintf("%s:%s", req.SNI, port)
@@ -1436,18 +1465,29 @@ func handleCreateConnection(w http.ResponseWriter, r *http.Request) {
 		KeepAlive: 30 * time.Second,
 	}
 	
+	log.Printf("🔹 Attempting DNS resolution for %s", req.SNI)
+	ips, err := net.LookupIP(req.SNI)
+	if err != nil {
+		log.Printf("⚠️ DNS resolution failed: %v", err)
+	} else {
+		log.Printf("✅ DNS resolution successful: %v", ips)
+	}
+	
+	log.Printf("🔹 Dialing TCP connection to %s", target)
 	conn, err := dialer.Dial("tcp", target)
 	if err != nil {
-		log.Printf("❌ Failed to connect to target: %v", err)
+		log.Printf("❌ SNI RESOLUTION FAILED: Could not connect to target: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to connect to target: %v", err), http.StatusInternalServerError)
 		return
 	}
 	
 	// Get the actual target address
 	remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
+	log.Printf("✅ CONNECTED TO TARGET: %s:%d", remoteAddr.IP.String(), remoteAddr.Port) 
 	
 	// Close connection - client will create a new one
 	conn.Close()
+	log.Printf("🔹 Connection closed - client will create new connection")
 	
 	// Return the address info to client
 	response := struct {
@@ -1460,9 +1500,11 @@ func handleCreateConnection(w http.ResponseWriter, r *http.Request) {
 		Port:    fmt.Sprintf("%d", remoteAddr.Port),
 	}
 	
-	log.Printf("✅ Successfully created connection to %s (%s:%d) for SNI concealment",
+	log.Printf("✅ SNI RESOLUTION COMPLETE: %s (%s:%d)",
 		req.SNI, remoteAddr.IP.String(), remoteAddr.Port)
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+	
+	log.Println("📣 SNI RESOLUTION RESPONSE SENT")
 }

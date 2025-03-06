@@ -98,10 +98,31 @@ type AppDataRequest struct {
 
 // NewOOBModule initializes the OOB module.
 func NewOOBModule(channels []OOBChannelConfig) *OOBModule {
-	return &OOBModule{
+	oob := &OOBModule{
 		Channels:     channels,
 		sessionStore: make(map[string]*SessionData),
 	}
+	
+	// Initialize an active peer from the available channels
+	for _, channel := range channels {
+		if channel.Type == "http" && len(channel.Address) > 0 {
+			peer := fmt.Sprintf("%s:%d", channel.Address, channel.Port)
+			log.Printf("🔹 Checking OOB peer %s...", peer)
+			if oob.CanConnect(peer) {
+				oob.activePeer = peer
+				log.Printf("✅ Set active OOB peer to %s", peer)
+				break
+			}
+		}
+	}
+	
+	if oob.activePeer == "" {
+		log.Printf("⚠️ WARNING: No active OOB peer found during initialization!")
+	} else {
+		log.Printf("🔹 OOB Module initialized with active peer: %s", oob.activePeer)
+	}
+	
+	return oob
 }
 
 // InitiateHandshake initializes a new handshake session.

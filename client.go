@@ -1266,31 +1266,68 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 
 // getTargetConnViaOOB connects to the target server via OOB to conceal SNI
 func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error) {
-	log.Printf("🔹 Connecting to target %s:%s via OOB for SNI concealment", sni, port)
+	log.Printf("🔒 SNI CONCEALMENT: Initiating connection to %s:%s via OOB", sni, port)
 	
 	// Create a simple request to the OOB server to signal SNI
 	serverAddr := p.OOB.GetServerAddress()
 	
+	// Check for empty server address
+	if serverAddr == "" {
+		log.Printf("❌ ERROR: No OOB server address available!")
+		
+		// Try to find a server by probing each channel directly
+		for _, channel := range p.OOB.Channels {
+			if channel.Type == "http" && len(channel.Address) > 0 {
+				possibleAddr := fmt.Sprintf("%s:%d", channel.Address, channel.Port)
+				log.Printf("🔹 Attempting to reach OOB server at %s", possibleAddr)
+				
+				// Try a quick connection test
+				conn, err := net.DialTimeout("tcp", possibleAddr, 2*time.Second)
+				if err == nil {
+					conn.Close()
+					serverAddr = possibleAddr
+					log.Printf("✅ Successfully connected to OOB server at %s", serverAddr)
+					break
+				}
+			}
+		}
+		
+		if serverAddr == "" {
+			return nil, fmt.Errorf("no available OOB server for SNI concealment")
+		}
+	}
+	
+	log.Printf("🔹 Using OOB server at %s", serverAddr)
+	
 	// Create a session ID
 	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+	log.Printf("🔹 Created session ID: %s", sessionID)
 	
 	// Send a simple OOB request with just the SNI info
 	reqBody := fmt.Sprintf(`{"session_id":"%s","sni":"%s","port":"%s"}`, 
 		sessionID, sni, port)
 	
-	resp, err := http.Post(
+	log.Printf("🔹 Sending SNI resolution request to OOB server")
+	req, _ := http.NewRequest("POST", 
 		fmt.Sprintf("http://%s/create_connection", serverAddr),
-		"application/json",
-		strings.NewReader(reqBody),
-	)
+		strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Sultry-Client/1.0")
+	
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	
 	if err != nil {
+		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to send OOB request: %v", err)
 		return nil, fmt.Errorf("failed to send OOB request: %w", err)
 	}
 	defer resp.Body.Close()
 	
+	log.Printf("🔹 Received response from OOB server: HTTP %d", resp.StatusCode)
+	
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("❌ SNI CONCEALMENT ERROR: OOB server returned error: %s", string(body))
 		return nil, fmt.Errorf("OOB server error: %s", string(body))
 	}
 	
@@ -1302,20 +1339,27 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 	}
 	
 	if err := json.NewDecoder(resp.Body).Decode(&connResponse); err != nil {
+		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to decode OOB response: %v", err)
 		return nil, fmt.Errorf("failed to decode OOB response: %w", err)
 	}
 	
+	log.Printf("📝 OOB RESPONSE: Status=%s, Address=%s, Port=%s", 
+		connResponse.Status, connResponse.Address, connResponse.Port)
+	
 	if connResponse.Status != "ok" {
+		log.Printf("❌ SNI CONCEALMENT ERROR: OOB returned non-OK status: %s", connResponse.Status)
 		return nil, fmt.Errorf("OOB error: %s", connResponse.Status)
 	}
 	
 	// Connect to the target information returned by OOB server
 	targetAddr := fmt.Sprintf("%s:%s", connResponse.Address, connResponse.Port)
-	log.Printf("🔹 Connecting to target via %s", targetAddr)
+	log.Printf("🔒 SNI CONCEALED: Connecting directly to IP %s (real hostname: %s)", targetAddr, sni)
 	
 	// Connect to the real target
+	log.Printf("🔹 Creating TCP connection to %s", targetAddr)
 	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
 	if err != nil {
+		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to connect to target: %v", err)
 		return nil, fmt.Errorf("failed to connect to target via OOB: %w", err)
 	}
 	
@@ -1324,8 +1368,9 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 		tcpConn.SetNoDelay(true)
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		log.Printf("🔹 TCP connection optimized with NoDelay and KeepAlive")
 	}
 	
-	log.Printf("✅ Successfully connected to target via OOB channel")
+	log.Printf("✅ SNI CONCEALMENT SUCCESSFUL: Connected to %s via IP %s", sni, targetAddr)
 	return conn, nil
 }
