@@ -94,15 +94,32 @@ This architecture makes Sultry significantly harder to detect and block compared
 ## Usage
 
 1. Configure in config.json
-2. Run with `go run .` or `go build && ./sultry`
-3. Configure your client to use the proxy
+2. Build with `go build` or run directly with `go run .`
+3. Run in one of three modes:
 
-### For HTTP connections:
+### Running Modes
+
+```bash
+# Client mode (default) - handles client connections and OOB SNI resolution
+./sultry --mode client
+
+# Server mode - provides SNI resolution services
+./sultry --mode server
+
+# Dual mode - runs both client and server components on the same machine
+./sultry --mode dual
+```
+
+For typical deployments, you would run the server component on a machine outside the censored network and the client component on the local machine.
+
+### Using with curl
+
+#### For HTTP connections:
 ```bash
 curl -x http://127.0.0.1:7008 http://example.com/
 ```
 
-### For HTTPS connections:
+#### For HTTPS connections:
 ```bash
 curl -x http://127.0.0.1:7008 https://example.com/
 ```
