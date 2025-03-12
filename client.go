@@ -40,21 +40,21 @@ type DirectConnectCommand struct {
 
 // TLSProxy handles the proxy functionality with multiple connection strategies.
 // It supports several methods to establish connections to target servers:
-// 1. OOB Handshake Relay - For SNI concealment and bypassing network restrictions (primary when SNI concealment is prioritized)
-//    a. Full ClientHello Concealment - Entire ClientHello is relayed via OOB (highest protection)
-//    b. SNI-only Concealment - Only SNI info is sent via OOB, direct connection to IP (medium protection)
-// 2. Pure Tunnel Mode - Standard HTTP CONNECT proxy for transparent HTTPS tunneling (fallback or used when SNI concealment is not prioritized)
-// 3. Direct HTTP Fetch - For efficient handling of plain HTTP requests
+//  1. OOB Handshake Relay - For SNI concealment and bypassing network restrictions (primary when SNI concealment is prioritized)
+//     a. Full ClientHello Concealment - Entire ClientHello is relayed via OOB (highest protection)
+//     b. SNI-only Concealment - Only SNI info is sent via OOB, direct connection to IP (medium protection)
+//  2. Pure Tunnel Mode - Standard HTTP CONNECT proxy for transparent HTTPS tunneling (fallback or used when SNI concealment is not prioritized)
+//  3. Direct HTTP Fetch - For efficient handling of plain HTTP requests
 //
 // The OOB (Out-of-Band) handshake relay mode is particularly useful for concealing
 // SNI information from network monitors or firewalls, as the ClientHello containing
 // the SNI is sent via HTTP to the OOB server rather than directly to the target.
 type TLSProxy struct {
-	OOB                     *OOBModule // Out-of-Band communication module for handshake relay
-	FakeSNI                 string     // Optional SNI value to use instead of the actual target
-	PrioritizeSNI           bool       // Whether to prioritize SNI concealment over direct tunneling
+	OOB                        *OOBModule // Out-of-Band communication module for handshake relay
+	FakeSNI                    string     // Optional SNI value to use instead of the actual target
+	PrioritizeSNI              bool       // Whether to prioritize SNI concealment over direct tunneling
 	FullClientHelloConcealment bool       // Whether to use full ClientHello concealment for maximum protection
-	HandshakeTimeout        int        // Timeout in milliseconds for handshake operations
+	HandshakeTimeout           int        // Timeout in milliseconds for handshake operations
 }
 
 // Start runs the TLS proxy.
@@ -79,13 +79,13 @@ func (p *TLSProxy) Start(localAddr string) {
 func client(config *Config) {
 	oobModule := NewOOBModule(config.OOBChannels)
 	proxy := TLSProxy{
-		OOB:                     oobModule, 
-		FakeSNI:                 config.CoverSNI,
-		PrioritizeSNI:           config.PrioritizeSNI,
+		OOB:                        oobModule,
+		FakeSNI:                    config.CoverSNI,
+		PrioritizeSNI:              config.PrioritizeSNI,
 		FullClientHelloConcealment: config.FullClientHelloConcealment,
-		HandshakeTimeout:        config.HandshakeTimeout,
+		HandshakeTimeout:           config.HandshakeTimeout,
 	}
-	
+
 	if proxy.PrioritizeSNI {
 		if proxy.FullClientHelloConcealment {
 			log.Println("🔒 ENHANCED PROTECTION: Full ClientHello concealment enabled")
@@ -96,11 +96,11 @@ func client(config *Config) {
 	} else {
 		log.Println("🔹 Standard mode - direct tunnel will be used with OOB as fallback")
 	}
-	
+
 	if proxy.HandshakeTimeout == 0 {
 		proxy.HandshakeTimeout = 10000 // Default to 10 seconds for handshake if not specified
 	}
-	
+
 	proxy.Start(config.LocalProxyAddr)
 }
 
@@ -154,7 +154,7 @@ func (p *TLSProxy) handleConnection(clientConn net.Conn) {
 		parts := strings.Split(dataStr, " ")
 		if len(parts) >= 2 {
 			hostPort := strings.TrimSpace(parts[1])
-			
+
 			// Always use direct tunnel method for HTTPS
 			// SNI concealment will happen internally if configured
 			log.Printf("🔹 Using direct tunnel for: %s", hostPort)
@@ -172,7 +172,7 @@ func (p *TLSProxy) handleConnection(clientConn net.Conn) {
 		p.handleDirectHttpRequest(clientConn, bufReader, dataStr)
 	} else {
 		log.Println("🔹 Detected unknown protocol or direct TLS")
-		
+
 		// Unknown protocol - use direct tunnel
 		log.Printf("🔹 Using direct tunnel for unknown protocol")
 		p.handleTunnelConnect(clientConn, "unknown:443")
@@ -394,17 +394,17 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 	clientConn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	n, err := clientConn.Read(clientHelloBuffer)
 	clientConn.SetReadDeadline(time.Time{})
-	
+
 	if err != nil {
 		log.Printf("❌ Failed to read ClientHello: %v", err)
 		return
 	}
-	
+
 	clientHello := clientHelloBuffer[:n]
 	log.Printf("🔹 Read ClientHello (%d bytes)", n)
 
 	var targetConn net.Conn
-	
+
 	// Apply concealment strategies if configured
 	if p.PrioritizeSNI {
 		// Extract SNI from ClientHello
@@ -414,28 +414,31 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			// Use hostname from CONNECT request as fallback
 			sni = host
 		}
-		
+
 		log.Printf("🔒 CONCEALMENT: Using OOB to protect connection to: %s", sni)
-		
+
+		// Variable for session tracking when using full ClientHello concealment
+		var sessionID string
+
 		// Check if we should use full ClientHello concealment (maximum protection)
 		if p.FullClientHelloConcealment {
 			log.Printf("🔒 ENHANCED: Using full ClientHello concealment via OOB")
-			
+
 			// Create a session ID for this connection
-			sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
-			
+			sessionID = fmt.Sprintf("%d", time.Now().UnixNano())
+
 			// Initialize handshake via OOB with the full ClientHello
 			log.Printf("🔹 Initiating full handshake relay for session %s", sessionID)
 			err = p.OOB.InitiateHandshake(sessionID, clientHello, sni)
 			if err != nil {
 				log.Printf("❌ Failed to initiate handshake via OOB: %v", err)
-				
+
 				// Fall back to SNI-only concealment as a second option
 				log.Printf("⚠️ Falling back to SNI-only concealment for %s", sni)
 				targetConn, err = p.getTargetConnViaOOB(sni, port)
 				if err != nil {
 					log.Printf("❌ Failed to establish connection via SNI-only OOB: %v", err)
-					
+
 					// Last resort: direct connection
 					log.Printf("⚠️ Falling back to direct connection to %s:%s", host, port)
 					targetConn, err = net.DialTimeout("tcp", host+":"+port, 10*time.Second)
@@ -444,7 +447,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 						return
 					}
 				}
-				
+
 				// Skip the rest of the ClientHello relay logic if we've established a connection via fallback
 				goto sendClientHello
 			}
@@ -454,7 +457,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			targetConn, err = p.getTargetConnViaOOB(sni, port)
 			if err != nil {
 				log.Printf("❌ Failed to establish connection via OOB: %v", err)
-				
+
 				// Fallback to direct connection
 				log.Printf("⚠️ Falling back to direct connection to %s:%s", host, port)
 				targetConn, err = net.DialTimeout("tcp", host+":"+port, 10*time.Second)
@@ -463,11 +466,11 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 					return
 				}
 			}
-			
+
 			// Skip to sending the ClientHello directly
 			goto sendClientHello
 		}
-		
+
 		// Get the handshake response
 		log.Printf("🔹 Getting initial ServerHello response from OOB server")
 		serverHelloResp, err := p.OOB.GetHandshakeResponse(sessionID)
@@ -482,7 +485,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			}
 			goto sendClientHello
 		}
-		
+
 		// Send ServerHello to client
 		log.Printf("🔹 Forwarding ServerHello (%d bytes) to client", len(serverHelloResp.Data))
 		if len(serverHelloResp.Data) > 0 {
@@ -495,31 +498,31 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		} else {
 			log.Printf("⚠️ Received empty ServerHello response")
 		}
-		
+
 		// Complete handshake with bidirectional relay
 		log.Printf("🔹 Beginning bidirectional handshake relay")
-		
+
 		// Create channels for synchronization
 		completedChan := make(chan struct{})
 		errorChan := make(chan error, 2)
-		
+
 		// Set up signal handling for cleanup
 		defer func() {
 			// Signal handshake completion
 			log.Printf("🔹 Signaling handshake completion to server...")
 			p.signalHandshakeCompletion(sessionID)
 		}()
-		
+
 		// Goroutine to receive server responses via OOB and forward to client
 		go func() {
 			defer func() {
 				log.Printf("🔹 Server->Client handshake relay finished")
 			}()
-			
+
 			responseCount := 0
 			maxEmptyResponses := 3 // Allow a few empty responses before completing
 			emptyResponseCount := 0
-			
+
 			// Loop to get and forward additional handshake messages
 			for {
 				log.Printf("🔹 Polling for handshake response #%d from server", responseCount+1)
@@ -529,38 +532,38 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 					errorChan <- fmt.Errorf("failed to get handshake response: %w", err)
 					return
 				}
-				
+
 				// Check if handshake is complete
 				if response.HandshakeComplete {
 					log.Printf("✅ Server marked handshake as complete")
 					close(completedChan)
 					return
 				}
-				
+
 				// Handle case with no data
 				if len(response.Data) == 0 {
 					emptyResponseCount++
 					log.Printf("💤 Received empty response #%d", emptyResponseCount)
-					
+
 					// After receiving several empty responses, consider handshake may be complete
 					if emptyResponseCount >= maxEmptyResponses {
 						log.Printf("✅ Assuming handshake complete after %d empty responses", emptyResponseCount)
 						close(completedChan)
 						return
 					}
-					
+
 					// Sleep briefly to avoid tight polling
 					time.Sleep(100 * time.Millisecond)
 					continue
 				}
-				
+
 				// Reset empty response counter when we get actual data
 				emptyResponseCount = 0
-				
+
 				// Forward response to client
 				responseCount++
 				log.Printf("🔹 Received server response #%d: %d bytes", responseCount, len(response.Data))
-				
+
 				// Log TLS record info if possible
 				if len(response.Data) >= 5 {
 					recordType := response.Data[0]
@@ -576,7 +579,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 						log.Printf("🔹 Server application data: %d bytes", len(response.Data))
 					}
 				}
-				
+
 				log.Printf("🔹 Forwarding %d bytes from server to client", len(response.Data))
 				_, err = clientConn.Write(response.Data)
 				if err != nil {
@@ -587,19 +590,19 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 				log.Printf("✅ Successfully forwarded server response to client")
 			}
 		}()
-		
+
 		// Goroutine to receive client messages and forward via OOB
 		go func() {
 			defer func() {
 				log.Printf("🔹 Client->Server handshake relay finished")
 			}()
-			
+
 			// First message was already sent as clientHello during InitiateHandshake
-			
+
 			// Read and forward additional handshake messages
 			buffer := make([]byte, 16384)
 			clientMsgCount := 0
-			
+
 			for {
 				// Check if handshake is already complete
 				select {
@@ -608,18 +611,18 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 				default:
 					// Continue with reading
 				}
-				
+
 				// Set a reasonable read deadline
 				clientConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 				n, err := clientConn.Read(buffer)
 				clientConn.SetReadDeadline(time.Time{})
-				
+
 				if err != nil {
 					if err == io.EOF {
 						log.Printf("🔹 Client closed connection during handshake")
 						return
 					}
-					
+
 					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 						// Check if we're done
 						select {
@@ -630,16 +633,16 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 							continue
 						}
 					}
-					
+
 					log.Printf("❌ ERROR reading from client: %v", err)
 					errorChan <- fmt.Errorf("failed to read from client: %w", err)
 					return
 				}
-				
+
 				if n > 0 {
 					clientMsgCount++
 					log.Printf("🔹 Received client message #%d: %d bytes", clientMsgCount, n)
-					
+
 					// Log TLS record info if possible
 					if n >= 5 {
 						recordType := buffer[0]
@@ -655,7 +658,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 							log.Printf("🔹 Client application data: %d bytes", n)
 						}
 					}
-					
+
 					log.Printf("🔹 Forwarding %d bytes from client to server", n)
 					err = p.OOB.SendHandshakeData(sessionID, buffer[:n])
 					if err != nil {
@@ -667,7 +670,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 				}
 			}
 		}()
-		
+
 		// Wait for handshake completion with configurable timeout
 		timeoutDuration := time.Duration(p.HandshakeTimeout) * time.Millisecond
 		if timeoutDuration == 0 {
@@ -675,7 +678,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		}
 		log.Printf("🔹 Waiting for handshake completion with %s timeout", timeoutDuration)
 		timeoutChan := time.After(timeoutDuration)
-		
+
 		select {
 		case <-completedChan:
 			log.Printf("✅ TLS handshake completed successfully via signal")
@@ -693,7 +696,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			}
 			goto sendClientHello
 		}
-		
+
 		// Signal handshake completion to the server
 		log.Printf("🔹 Signaling handshake completion to server...")
 		err = p.signalHandshakeCompletion(sessionID)
@@ -701,18 +704,25 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			log.Printf("❌ Failed to signal handshake completion: %v", err)
 			// Continue anyway as this is non-critical
 		}
-		
-		// Move to direct connection for application data
-		log.Printf("🔹 Establishing direct connection for application data")
-		targetConn, err = p.establishDirectConnectionAfterHandshake(sessionID)
-		if err != nil {
-			log.Printf("❌ Failed to establish direct connection: %v", err)
-			// Fallback to relay mode
-			log.Printf("⚠️ Falling back to relay mode for session %s", sessionID)
-			p.fallbackToRelayMode(clientConn, sessionID)
-			return
-		}
-		
+
+		// For now, continue using OOB relay for all data until we implement proper TLS session resumption
+		log.Printf("🔹 Using OOB relay for application data exchange")
+		p.fallbackToRelayMode(clientConn, sessionID)
+		return
+
+		// TODO: Implement proper TLS session resumption
+		/*
+			log.Printf("🔹 Establishing direct connection for application data")
+			targetConn, err = p.establishDirectConnectionAfterHandshake(sessionID)
+			if err != nil {
+				log.Printf("❌ Failed to establish direct connection: %v", err)
+				// Fallback to relay mode
+				log.Printf("⚠️ Falling back to relay mode for session %s", sessionID)
+				p.fallbackToRelayMode(clientConn, sessionID)
+				return
+			}
+		*/
+
 		// Connection was established through the full handshake relay
 		// Skip the ClientHello forwarding since it was already done through OOB
 		goto skipClientHello
@@ -738,7 +748,7 @@ sendClientHello:
 	log.Printf("✅ Forwarded ClientHello to target")
 
 skipClientHello:
-	
+
 	defer targetConn.Close()
 
 	// Set up bidirectional relay
@@ -746,8 +756,22 @@ skipClientHello:
 
 	// Improve relay performance
 	if tcpConn, ok := targetConn.(*net.TCPConn); ok {
+		tcpConn.SetNoDelay(true)                     // Disable Nagle's algorithm for better performance
+		tcpConn.SetKeepAlive(true)                   // Enable TCP keepalive
+		tcpConn.SetKeepAlivePeriod(30 * time.Second) // Set keepalive period
+		tcpConn.SetReadBuffer(65536)                 // 64KB read buffer
+		tcpConn.SetWriteBuffer(65536)                // 64KB write buffer
+		log.Printf("🔹 Target connection optimized with TCP parameters")
+	}
+
+	// Optimize client connection as well
+	if tcpConn, ok := clientConn.(*net.TCPConn); ok {
 		tcpConn.SetNoDelay(true)
 		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		tcpConn.SetReadBuffer(65536)
+		tcpConn.SetWriteBuffer(65536)
+		log.Printf("🔹 Client connection optimized with TCP parameters")
 	}
 
 	// Use wait group to manage relay goroutines
@@ -757,14 +781,14 @@ skipClientHello:
 	// Client -> Target
 	go func() {
 		defer wg.Done()
-		buffer := make([]byte, 1048576) // 1MB buffer for large requests
+		buffer := make([]byte, 16384) // 16KB buffer to match typical TLS record size
 		relayData(clientConn, targetConn, buffer, "Client -> Target")
 	}()
 
 	// Target -> Client
 	go func() {
 		defer wg.Done()
-		buffer := make([]byte, 1048576) // 1MB buffer for large responses
+		buffer := make([]byte, 16384) // 16KB buffer to match typical TLS record size
 		relayData(targetConn, clientConn, buffer, "Target -> Client")
 	}()
 
@@ -1271,9 +1295,34 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 	// Get the target information for ALPN protocol detection
 	_, err = p.getTargetInfo(sessionID, nil)
 
-	// Don't force a specific protocol version - let client and server negotiate
-	var protocol string
-	log.Printf("🔹 Using dynamic protocol negotiation - allowing client to determine TLS version")
+	// Get TLS version from handshake to ensure compatibility
+	protocol := "tls1.3"  // Default to TLS 1.3, but we'll adapt based on server response
+	
+	// Try to detect the negotiated TLS version
+	targetInfo, err := p.getTargetInfo(sessionID, nil)
+	if err == nil && targetInfo.Version > 0 {
+		// Check for standard TLS version codes
+		detectedVersion := targetInfo.Version
+		log.Printf("🔹 Detected TLS record version: 0x%04x", detectedVersion)
+		
+		// Use the detected version instead of forcing TLS 1.3
+		if detectedVersion == 0x0303 {
+			protocol = "tls1.2"
+			log.Printf("🔹 Using TLS 1.2 based on detected record version")
+		} else if detectedVersion == 0x0304 {
+			protocol = "tls1.3"
+			log.Printf("🔹 Using TLS 1.3 based on detected record version")
+		} else {
+			// For non-standard versions, default to TLS 1.2 which has wider compatibility
+			protocol = "tls1.2"
+			log.Printf("🔹 Using TLS 1.2 for compatibility with non-standard version")
+		}
+	} else {
+		log.Printf("🔹 Could not determine TLS version from handshake, defaulting to TLS 1.2")
+		protocol = "tls1.2"  // Use TLS 1.2 as a safe default
+	}
+	
+	log.Printf("✅ Using %s for relay connection", protocol)
 
 	reqBody := fmt.Sprintf(`{"session_id":"%s","protocol":"%s"}`, sessionID, protocol)
 	req := fmt.Sprintf("POST /adopt_connection HTTP/1.1\r\n"+
@@ -1309,7 +1358,8 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 		return
 	}
 
-	// Skip headers until empty line
+	// Process headers to extract any protocol information
+	var protocolInfo string
 	for {
 		line, err := bufReader.ReadString('\n')
 		if err != nil {
@@ -1319,7 +1369,19 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 		if line == "\r\n" {
 			break
 		}
-		log.Printf("🔹 Header: %s", strings.TrimSpace(line))
+
+		header := strings.TrimSpace(line)
+		log.Printf("🔹 Header: %s", header)
+
+		// Look for protocol information from server
+		if strings.HasPrefix(strings.ToLower(header), "x-protocol:") {
+			protocolInfo = strings.TrimSpace(strings.TrimPrefix(header, "X-Protocol:"))
+			log.Printf("🔹 Server indicated protocol version: %s", protocolInfo)
+		}
+	}
+
+	if protocolInfo != "" {
+		log.Printf("✅ Using protocol version: %s", protocolInfo)
 	}
 
 	log.Printf("✅ Connection adoption successful, starting data relay")
@@ -1342,10 +1404,11 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 	// 1. Send any unencrypted data over the connection
 	// 2. Try to parse or modify the TLS records in any way
 	// 3. Interfere with the TLS state machine
-	
+
 	// Just act as a pure TCP relay and let the TLS protocol flow naturally
-	log.Printf("🔹 Using pure TCP relay mode - no protocol interpretation")
+	log.Printf("🔹 Using pure TCP relay mode with TLS record integrity preservation")
 	log.Printf("🔹 Enabling graceful shutdown behavior to handle connection resets")
+	log.Printf("🔹 TLS MAC failure prevention: Ensuring complete TLS records")
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -1368,14 +1431,16 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 	// Client -> Target with enhanced progress logging
 	go func() {
 		defer wg.Done()
-		buffer := make([]byte, 1048576) // 1MB buffer for large requests
+		// Use a buffer large enough for TLS records but not so large we fragment across TCP packets
+		buffer := make([]byte, 16384) // 16KB is a common TLS record max size
 		relayData(clientConn, conn, buffer, "Client -> Target")
 	}()
 
 	// Target -> Client with enhanced progress logging
 	go func() {
 		defer wg.Done()
-		buffer := make([]byte, 1048576) // 1MB buffer for large responses
+		// Use a buffer large enough for TLS records but not so large we fragment across TCP packets
+		buffer := make([]byte, 16384) // 16KB is a common TLS record max size
 		relayData(conn, clientConn, buffer, "Target -> Client")
 	}()
 
@@ -1530,23 +1595,130 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 				if recordType >= 20 && recordType <= 24 {
 					version := (uint16(buffer[1]) << 8) | uint16(buffer[2])
 					length := (uint16(buffer[3]) << 8) | uint16(buffer[4])
-					log.Printf("🔹 %s: TLS Record: Type=%d, Version=0x%04x, Length=%d",
-						label, recordType, version, length)
+					expectedLen := int(length) + 5 // record header (5 bytes) + payload length
+					
+					// Enhanced version logging with human-readable format
+					versionStr := "Unknown"
+					if version == 0x0303 {
+						versionStr = "TLS1.2"
+					} else if version == 0x0304 {
+						versionStr = "TLS1.3"
+					} else if version == 0x0301 {
+						versionStr = "TLS1.0"
+					} else if version == 0x0302 {
+						versionStr = "TLS1.1"
+					}
+
+					// CRITICAL: Verify we have a complete TLS record 
+					// TLS requires exact record boundaries for MAC verification
+					if n < expectedLen {
+						log.Printf("⚠️ %s: Incomplete TLS record: got %d bytes, expected %d", 
+							label, n, expectedLen)
+						
+						// For TLS, incomplete records will cause MAC failures
+						// We must read more data to complete the record
+						if n < len(buffer) && expectedLen <= len(buffer) {
+							totalAdditionalBytes := 0
+							remainingBytes := expectedLen - n
+							
+							// Try up to 5 reads to get the complete record
+							for attempts := 0; attempts < 5 && remainingBytes > 0; attempts++ {
+								// Try to read the rest of the record with a longer timeout
+								source.SetReadDeadline(time.Now().Add(2 * time.Second)) // Increased timeout
+								additionalBytes, err := source.Read(buffer[n:n+remainingBytes])
+								source.SetReadDeadline(time.Time{})
+								
+								if err != nil {
+									log.Printf("❌ %s: Failed to complete TLS record on attempt %d: %v", label, attempts+1, err)
+									break
+								}
+								
+								if additionalBytes > 0 {
+									n += additionalBytes
+									totalAdditionalBytes += additionalBytes
+									remainingBytes = expectedLen - n
+									
+									log.Printf("🔹 %s: Read additional %d bytes on attempt %d, still need %d bytes", 
+										label, additionalBytes, attempts+1, remainingBytes)
+									
+									if remainingBytes <= 0 {
+										log.Printf("✅ %s: Completed TLS record after %d attempts, added %d bytes", 
+											label, attempts+1, totalAdditionalBytes)
+										break
+									}
+								} else {
+									// No data read, no need to continue attempts
+									log.Printf("⚠️ %s: Read 0 additional bytes on attempt %d", label, attempts+1)
+									break
+								}
+							}
+							
+							if remainingBytes > 0 {
+								log.Printf("⚠️ %s: Could not complete TLS record after multiple attempts, still missing %d bytes", 
+									label, remainingBytes)
+							}
+						}
+					}
+
+					log.Printf("🔹 %s: TLS Record: Type=%d, Version=%s (0x%04x), Length=%d/%d",
+						label, recordType, versionStr, version, length, n)
+						
+					// Special handling for TLS 1.3 records with 0x0303 version field
+					// This is normal in TLS 1.3, which uses 0x0303 in the record layer for compatibility
+					if version == 0x0303 {
+						log.Printf("ℹ️ %s: Note: TLS record with 0x0303 version field is normal in both TLS 1.2 and TLS 1.3", label)
+					}
 				} else {
 					// This is likely application data
 					log.Printf("🔹 %s: Application data: %d bytes", label, n)
 				}
 			}
 
-			// Write to destination
-			destination.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			written, err := destination.Write(buffer[:n])
+			// Write to destination immediately to avoid buffering delays
+			// For TLS records, we must ensure they're written completely and atomically
+			destination.SetWriteDeadline(time.Now().Add(15 * time.Second)) // Increased timeout for writes
+			
+			// Check if this is a TLS record that requires atomic writing
+			isTLSRecord := n >= 5 && buffer[0] >= 20 && buffer[0] <= 24
+			if isTLSRecord {
+				// For TLS records, we must be extra careful to maintain record boundaries
+				log.Printf("🔒 %s: Ensuring atomic write for complete TLS record (%d bytes)", label, n)
+			}
+			
+			// Use a write loop to ensure complete write
+			written := 0
+			bytesRemaining := n
+			currentOffset := 0
+			
+			for bytesRemaining > 0 {
+				w, err := destination.Write(buffer[currentOffset:currentOffset+bytesRemaining])
+				if err != nil {
+					log.Printf("❌ %s: Error writing at offset %d: %v", label, currentOffset, err)
+					break
+				}
+				
+				written += w
+				bytesRemaining -= w
+				currentOffset += w
+				
+				if bytesRemaining > 0 {
+					log.Printf("🔹 %s: Partial write: %d/%d bytes, continuing...", label, written, n)
+					
+					// For TLS records, log a warning about partial writes
+					if isTLSRecord {
+						log.Printf("⚠️ %s: TLS record partially written - this could cause protocol errors if not completed", label)
+					}
+				}
+			}
+			
+			// Verify and log completion for TLS records
+			if isTLSRecord && written == n {
+				log.Printf("✅ %s: TLS record completely written (%d bytes)", label, written)
+			}
+			
 			destination.SetWriteDeadline(time.Time{})
 
-			if err != nil {
-				log.Printf("❌ %s: Error writing: %v", label, err)
-				break
-			}
+			// Error handling now done in the write loop above
 
 			if written != n {
 				log.Printf("⚠️ %s: Short write: %d/%d bytes", label, written, n)
@@ -1569,28 +1741,28 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 // the handshake relay phase.
 func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
 	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
-	
+
 	// First, get target information from the OOB server
 	targetInfo, err := p.getTargetInfo(sessionID, nil)
 	if err != nil {
 		log.Printf("❌ Failed to get target information: %v", err)
 		return nil, err
 	}
-	
+
 	// Log what we're connecting to
-	log.Printf("🔹 Target information: Host=%s, IP=%s, Port=%d", 
+	log.Printf("🔹 Target information: Host=%s, IP=%s, Port=%d",
 		targetInfo.TargetHost, targetInfo.TargetIP, targetInfo.TargetPort)
-	
+
 	// Connect to the target IP directly
 	targetAddr := fmt.Sprintf("%s:%d", targetInfo.TargetIP, targetInfo.TargetPort)
 	log.Printf("🔹 Connecting directly to %s", targetAddr)
-	
+
 	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
 	if err != nil {
 		log.Printf("❌ Failed to connect to target: %v", err)
 		return nil, err
 	}
-	
+
 	// Optimize connection
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetNoDelay(true)
@@ -1598,34 +1770,34 @@ func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (ne
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
 		log.Printf("🔹 TCP connection optimized")
 	}
-	
+
 	log.Printf("✅ Established direct connection to %s for session %s", targetAddr, sessionID)
-	
+
 	// Note: In a future version, we could include session ticket and other TLS state
 	// data to allow for even more seamless resumption of the TLS session without
 	// requiring a full handshake again. This would require extracting and passing
 	// the TLS session state.
-	
+
 	return conn, nil
 }
 
 // getTargetConnViaOOB connects to the target server via OOB to conceal SNI
 func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error) {
 	log.Printf("🔒 SNI CONCEALMENT: Initiating connection to %s:%s via OOB", sni, port)
-	
+
 	// Create a simple request to the OOB server to signal SNI
 	serverAddr := p.OOB.GetServerAddress()
-	
+
 	// Check for empty server address
 	if serverAddr == "" {
 		log.Printf("❌ ERROR: No OOB server address available!")
-		
+
 		// Try to find a server by probing each channel directly
 		for _, channel := range p.OOB.Channels {
 			if channel.Type == "http" && len(channel.Address) > 0 {
 				possibleAddr := fmt.Sprintf("%s:%d", channel.Address, channel.Port)
 				log.Printf("🔹 Attempting to reach OOB server at %s", possibleAddr)
-				
+
 				// Try a quick connection test
 				conn, err := net.DialTimeout("tcp", possibleAddr, 2*time.Second)
 				if err == nil {
@@ -1636,70 +1808,70 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 				}
 			}
 		}
-		
+
 		if serverAddr == "" {
 			return nil, fmt.Errorf("no available OOB server for SNI concealment")
 		}
 	}
-	
+
 	log.Printf("🔹 Using OOB server at %s", serverAddr)
-	
+
 	// Create a session ID
 	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
 	log.Printf("🔹 Created session ID: %s", sessionID)
-	
+
 	// Send a simple OOB request with just the SNI info
-	reqBody := fmt.Sprintf(`{"session_id":"%s","sni":"%s","port":"%s"}`, 
+	reqBody := fmt.Sprintf(`{"session_id":"%s","sni":"%s","port":"%s"}`,
 		sessionID, sni, port)
-	
+
 	log.Printf("🔹 Sending SNI resolution request to OOB server")
-	req, _ := http.NewRequest("POST", 
+	req, _ := http.NewRequest("POST",
 		fmt.Sprintf("http://%s/create_connection", serverAddr),
 		strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Sultry-Client/1.0")
-	
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
-	
+
 	if err != nil {
 		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to send OOB request: %v", err)
 		return nil, fmt.Errorf("failed to send OOB request: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	log.Printf("🔹 Received response from OOB server: HTTP %d", resp.StatusCode)
-	
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		log.Printf("❌ SNI CONCEALMENT ERROR: OOB server returned error: %s", string(body))
 		return nil, fmt.Errorf("OOB server error: %s", string(body))
 	}
-	
+
 	// Parse response to get connection details
 	var connResponse struct {
 		Status  string `json:"status"`
 		Address string `json:"address"`
 		Port    string `json:"port"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&connResponse); err != nil {
 		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to decode OOB response: %v", err)
 		return nil, fmt.Errorf("failed to decode OOB response: %w", err)
 	}
-	
-	log.Printf("📝 OOB RESPONSE: Status=%s, Address=%s, Port=%s", 
+
+	log.Printf("📝 OOB RESPONSE: Status=%s, Address=%s, Port=%s",
 		connResponse.Status, connResponse.Address, connResponse.Port)
-	
+
 	if connResponse.Status != "ok" {
 		log.Printf("❌ SNI CONCEALMENT ERROR: OOB returned non-OK status: %s", connResponse.Status)
 		return nil, fmt.Errorf("OOB error: %s", connResponse.Status)
 	}
-	
+
 	// Connect to the target information returned by OOB server
 	targetAddr := fmt.Sprintf("%s:%s", connResponse.Address, connResponse.Port)
 	log.Printf("🔒 SNI CONCEALED: Connecting directly to IP %s (real hostname: %s)", targetAddr, sni)
-	
+
 	// Connect to the real target
 	log.Printf("🔹 Creating TCP connection to %s", targetAddr)
 	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
@@ -1707,7 +1879,7 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 		log.Printf("❌ SNI CONCEALMENT ERROR: Failed to connect to target: %v", err)
 		return nil, fmt.Errorf("failed to connect to target via OOB: %w", err)
 	}
-	
+
 	// Optimize connection
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetNoDelay(true)
@@ -1715,97 +1887,7 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
 		log.Printf("🔹 TCP connection optimized with NoDelay and KeepAlive")
 	}
-	
+
 	log.Printf("✅ SNI CONCEALMENT SUCCESSFUL: Connected to %s via IP %s", sni, targetAddr)
-	return conn, nil
-}
-
-// establishDirectConnectionAfterHandshake creates a direct connection to the target
-// after completing the TLS handshake via OOB relay. This function gets connection
-// details from the server component and establishes a direct TCP connection for
-// application data exchange while maintaining the TLS session established during
-// the handshake relay phase.
-func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
-	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
-	
-	// First, get target information from the OOB server
-	targetInfo, err := p.getTargetInfo(sessionID, nil)
-	if err != nil {
-		log.Printf("❌ Failed to get target information: %v", err)
-		return nil, err
-	}
-	
-	// Log what we're connecting to
-	log.Printf("🔹 Target information: Host=%s, IP=%s, Port=%d", 
-		targetInfo.TargetHost, targetInfo.TargetIP, targetInfo.TargetPort)
-	
-	// Connect to the target IP directly
-	targetAddr := fmt.Sprintf("%s:%d", targetInfo.TargetIP, targetInfo.TargetPort)
-	log.Printf("🔹 Connecting directly to %s", targetAddr)
-	
-	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
-	if err != nil {
-		log.Printf("❌ Failed to connect to target: %v", err)
-		return nil, err
-	}
-	
-	// Optimize connection
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetNoDelay(true)
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		log.Printf("🔹 TCP connection optimized")
-	}
-	
-	log.Printf("✅ Established direct connection to %s for session %s", targetAddr, sessionID)
-	
-	// Note: In a future version, we could include session ticket and other TLS state
-	// data to allow for even more seamless resumption of the TLS session without
-	// requiring a full handshake again. This would require extracting and passing
-	// the TLS session state.
-	
-	return conn, nil
-}
-
-// the handshake relay phase.
-func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
-	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
-	
-	// First, get target information from the OOB server
-	targetInfo, err := p.getTargetInfo(sessionID, nil)
-	if err != nil {
-		log.Printf("❌ Failed to get target information: %v", err)
-		return nil, err
-	}
-	
-	// Log what we're connecting to
-	log.Printf("🔹 Target information: Host=%s, IP=%s, Port=%d", 
-		targetInfo.TargetHost, targetInfo.TargetIP, targetInfo.TargetPort)
-	
-	// Connect to the target IP directly
-	targetAddr := fmt.Sprintf("%s:%d", targetInfo.TargetIP, targetInfo.TargetPort)
-	log.Printf("🔹 Connecting directly to %s", targetAddr)
-	
-	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
-	if err != nil {
-		log.Printf("❌ Failed to connect to target: %v", err)
-		return nil, err
-	}
-	
-	// Optimize connection
-	if tcpConn, ok := conn.(*net.TCPConn); ok {
-		tcpConn.SetNoDelay(true)
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(30 * time.Second)
-		log.Printf("🔹 TCP connection optimized")
-	}
-	
-	log.Printf("✅ Established direct connection to %s for session %s", targetAddr, sessionID)
-	
-	// Note: In a future version, we could include session ticket and other TLS state
-	// data to allow for even more seamless resumption of the TLS session without
-	// requiring a full handshake again. This would require extracting and passing
-	// the TLS session state.
-	
 	return conn, nil
 }

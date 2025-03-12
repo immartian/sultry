@@ -321,6 +321,46 @@ Modern Deep Packet Inspection (DPI) systems often rely on traffic pattern analys
    - Distributed relay network without central coordination
    - Integration with existing mesh networks for maximum resilience
 
+## Known Issues and Limitations
+
+While Sultry successfully implements Full ClientHello Concealment for enhanced censorship circumvention, there are some known limitations in the current implementation:
+
+1. **Session Resumption Not Fully Implemented**: 
+   - After the TLS handshake completes via OOB relay, the system doesn't yet implement proper TLS session resumption for direct connections
+   - This affects the efficiency of the connection after the initial handshake is complete
+   - In some cases, this may cause compatibility issues with certain websites or services
+
+2. **Application Data Relay Issues**:
+   - The current implementation may experience TLS version mismatch issues when switching from OOB relay to direct connections
+   - These can manifest as "wrong version number" or "bad record MAC" errors in some scenarios
+   - The core issue is that the client forces TLS 1.3 (0x0304) while some servers negotiate using TLS 1.2 (0x0303) record format
+   - For maximum compatibility, the system currently prefers to continue using OOB relay for application data
+
+3. **Performance Considerations**:
+   - Full ClientHello concealment adds some latency to the initial connection setup
+   - The OOB relay adds overhead compared to direct connections
+   - For performance-critical applications, consider using SNI-only concealment instead
+
+4. **TLS Version Compatibility**:
+   - Some websites negotiate using TLS 1.2 (0x0303) while advertising TLS 1.3 capabilities
+   - The TLS record version field (0x0303) is often used even in TLS 1.3 connections
+   - This can cause version mismatches when transitioning from OOB relay to direct connections
+   - The current approach attempts to detect and adapt to the actual negotiated version
+
+5. **Graceful Fallbacks**:
+   - The system automatically falls back from Full ClientHello concealment to SNI-only concealment if issues are detected
+   - If SNI-only concealment fails, it falls back to direct connections
+   - These fallbacks ensure service availability but with reduced protection levels
+
+6. **Connection Stability Issues**:
+   - After successful TLS handshake, connections may occasionally reset during application data transfer
+   - These can manifest as "connection reset by peer" or "broken pipe" errors
+   - Some targets may time out or close connections prematurely
+   - The current implementation lacks robust connection lifecycle management and error handling
+   - For long-lived connections, reliability cannot be guaranteed
+
+Future releases will focus on addressing these limitations by implementing proper TLS session resumption, improving connection stability, and enhancing error recovery mechanisms.
+
 ## License
 
 Sultry is released under the MIT License. See the [LICENSE](LICENSE) file for details.
