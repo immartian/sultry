@@ -740,16 +740,6 @@ sendClientHello:
 skipClientHello:
 	
 	defer targetConn.Close()
-	
-	// Send ClientHello to the target server
-	targetConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_, err = targetConn.Write(clientHello)
-	targetConn.SetWriteDeadline(time.Time{})
-	if err != nil {
-		log.Printf("❌ Failed to send ClientHello to target: %v", err)
-		return
-	}
-	log.Printf("✅ Forwarded ClientHello to target")
 
 	// Set up bidirectional relay
 	log.Printf("✅ TUNNEL: Connected to target, starting bidirectional relay")
@@ -1687,6 +1677,49 @@ func (p *TLSProxy) getTargetConnViaOOB(sni string, port string) (net.Conn, error
 // after completing the TLS handshake via OOB relay. This function gets connection
 // details from the server component and establishes a direct TCP connection for
 // application data exchange while maintaining the TLS session established during
+// the handshake relay phase.
+func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
+	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
+	
+	// First, get target information from the OOB server
+	targetInfo, err := p.getTargetInfo(sessionID, nil)
+	if err != nil {
+		log.Printf("❌ Failed to get target information: %v", err)
+		return nil, err
+	}
+	
+	// Log what we're connecting to
+	log.Printf("🔹 Target information: Host=%s, IP=%s, Port=%d", 
+		targetInfo.TargetHost, targetInfo.TargetIP, targetInfo.TargetPort)
+	
+	// Connect to the target IP directly
+	targetAddr := fmt.Sprintf("%s:%d", targetInfo.TargetIP, targetInfo.TargetPort)
+	log.Printf("🔹 Connecting directly to %s", targetAddr)
+	
+	conn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
+	if err != nil {
+		log.Printf("❌ Failed to connect to target: %v", err)
+		return nil, err
+	}
+	
+	// Optimize connection
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetNoDelay(true)
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		log.Printf("🔹 TCP connection optimized")
+	}
+	
+	log.Printf("✅ Established direct connection to %s for session %s", targetAddr, sessionID)
+	
+	// Note: In a future version, we could include session ticket and other TLS state
+	// data to allow for even more seamless resumption of the TLS session without
+	// requiring a full handshake again. This would require extracting and passing
+	// the TLS session state.
+	
+	return conn, nil
+}
+
 // the handshake relay phase.
 func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
 	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
