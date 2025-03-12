@@ -26,6 +26,7 @@
     "cover_sni": "harvard.edu",
     "prioritize_sni_concealment": true,
     "full_clienthello_concealment": true,
-    "handshake_timeout": 10000
+    "handshake_timeout": 10000,
+    "enforce_tls13": true
   }
   

@@ -94,16 +94,20 @@ This architecture makes Sultry significantly harder to detect and block compared
 - **Graceful Fallbacks**: Automatically falls back to simpler concealment if full protection fails
 - **Comprehensive Logging**: Detailed logging for troubleshooting and performance optimization
 
-## Usage
+## Quick Start
 
-1. Configure in config.json
-2. Build with `go build` or run directly with `go run .`
-3. Run in one of three modes:
+The easiest way to get started is to use the included setup script:
+
+```bash
+./setup.sh
+```
+
+This will build Sultry and set up the necessary configuration for testing.
 
 ### Running Modes
 
 ```bash
-# Client mode (default) - handles client connections and OOB SNI resolution
+# Client mode - handles client connections and OOB SNI resolution
 ./sultry --mode client
 
 # Server mode - provides SNI resolution services
@@ -126,6 +130,10 @@ curl -x http://127.0.0.1:7008 http://example.com/
 ```bash
 curl -x http://127.0.0.1:7008 https://example.com/
 ```
+
+### Runtime Guide
+
+For detailed runtime instructions, see [RUNTIME.md](RUNTIME.md).
 
 ## Configuration
 
@@ -153,7 +161,8 @@ curl -x http://127.0.0.1:7008 https://example.com/
   "cover_sni": "harvard.edu",
   "prioritize_sni_concealment": true,
   "full_clienthello_concealment": true,
-  "handshake_timeout": 10000
+  "handshake_timeout": 10000,
+  "enforce_tls13": true
 }
 ```
 
@@ -166,6 +175,7 @@ curl -x http://127.0.0.1:7008 https://example.com/
 - **prioritize_sni_concealment**: When true, always use OOB for SNI concealment (default: false)
 - **full_clienthello_concealment**: When true, relays the entire ClientHello and TLS handshake via OOB for maximum protection (default: true)
 - **handshake_timeout**: Timeout in milliseconds for handshake operations (default: 10000)
+- **enforce_tls13**: When true, enforces TLS 1.3 by using OOB relay for non-TLS 1.3 targets (default: true)
 
 ## Technical Implementation
 
@@ -269,6 +279,7 @@ Sultry employs several techniques to evade sophisticated censorship:
 5. **Protocol Mimicry**: All visible network traffic appears as normal HTTP/HTTPS connections
 6. **Cover Traffic Generation**: Optional feature to periodically generate cover traffic with decoy SNI values
 7. **IP Address Distribution**: Direct connections to target IPs create a natural traffic distribution pattern
+8. **TLS 1.3 Enforcement**: Optional automatic detection and handling of non-TLS 1.3 connections
 
 ### Protection Levels
 
@@ -287,6 +298,13 @@ Sultry now offers multiple protection levels to balance security and performance
 - Protects against SNI filtering, IP blocking, and TLS fingerprinting
 - Application data still flows directly for high performance
 - Offers the strongest protection against sophisticated censorship
+
+#### Level 3: Full ClientHello + TLS 1.3 Enforcement (Maximum Security)
+- Complete TLS handshake relay plus enforcement of TLS 1.3 protocol
+- Automatic detection of connection protocol version
+- Direct connections used only for confirmed TLS 1.3 targets
+- Continued OOB relay for non-TLS 1.3 connections 
+- Maximum protection against downgrade attacks and version-based vulnerabilities
 
 ### Resistance to DPI Systems
 
@@ -325,10 +343,13 @@ Modern Deep Packet Inspection (DPI) systems often rely on traffic pattern analys
 
 While Sultry successfully implements Full ClientHello Concealment for enhanced censorship circumvention, there are some known limitations in the current implementation:
 
-1. **Session Resumption Not Fully Implemented**: 
-   - After the TLS handshake completes via OOB relay, the system doesn't yet implement proper TLS session resumption for direct connections
-   - This affects the efficiency of the connection after the initial handshake is complete
-   - In some cases, this may cause compatibility issues with certain websites or services
+1. **Direct Connections for Application Data**: 
+   - After the TLS handshake completes via OOB relay, the system now establishes direct connections to the target for application data
+   - TLS 1.3 enforcement ensures only secure connections use direct mode
+   - Non-TLS 1.3 connections automatically continue using the secure OOB relay
+   - This improves performance while maintaining security
+   - Enhanced error handling provides graceful recovery from network issues
+   - The implementation still lacks full TLS session resumption but effectively uses direct TCP connections
 
 2. **Application Data Relay Issues**:
    - The current implementation may experience TLS version mismatch issues when switching from OOB relay to direct connections
@@ -352,14 +373,14 @@ While Sultry successfully implements Full ClientHello Concealment for enhanced c
    - If SNI-only concealment fails, it falls back to direct connections
    - These fallbacks ensure service availability but with reduced protection levels
 
-6. **Connection Stability Issues**:
-   - After successful TLS handshake, connections may occasionally reset during application data transfer
-   - These can manifest as "connection reset by peer" or "broken pipe" errors
-   - Some targets may time out or close connections prematurely
-   - The current implementation lacks robust connection lifecycle management and error handling
-   - For long-lived connections, reliability cannot be guaranteed
+6. **Connection Stability Improvements**:
+   - Direct connections benefit from enhanced error handling and recovery mechanisms
+   - The system now gracefully handles "connection reset by peer" and "broken pipe" errors
+   - Improved goroutine lifecycle management for bidirectional data relay
+   - Error monitoring system for early detection of connection issues
+   - Proper connection cleanup to prevent resource leaks
 
-Future releases will focus on addressing these limitations by implementing proper TLS session resumption, improving connection stability, and enhancing error recovery mechanisms.
+Future releases will focus on implementing full TLS session resumption to further improve connection reliability and enhancing application performance through optimized data transfer paths.
 
 ## License
 

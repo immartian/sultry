@@ -16,6 +16,7 @@ type Config struct {
 	PrioritizeSNI            bool               `json:"prioritize_sni_concealment"`
 	FullClientHelloConcealment bool               `json:"full_clienthello_concealment"`
 	HandshakeTimeout         int                `json:"handshake_timeout,omitempty"`
+	EnforceTLS13             bool               `json:"enforce_tls13,omitempty"`
 }
 
 // LoadConfig reads the configuration from the specified file.

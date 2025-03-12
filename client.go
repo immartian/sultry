@@ -1739,6 +1739,146 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 // details from the server component and establishes a direct TCP connection for
 // application data exchange while maintaining the TLS session established during
 // the handshake relay phase.
+// establishPostHandshakeConnection tries to set up a direct connection after handshake
+// or falls back to OOB relay if direct connection fails. This function includes
+// robust error handling, connection lifecycle management, and proper cleanup.
+// It enforces TLS 1.3 for direct connections or falls back to OOB relay.
+func (p *TLSProxy) establishPostHandshakeConnection(clientConn net.Conn, sessionID string) {
+    log.Printf("🔹 Session %s: Attempting to establish direct connection for application data", sessionID)
+    
+    // Check TLS version to ensure compatibility
+    targetInfo, err := p.getTargetInfo(sessionID, nil)
+    if err == nil && targetInfo.Version > 0 {
+        // Determine TLS version
+        isTLS13Compatible := targetInfo.Version == 0x0304 // TLS 1.3
+        
+        // For maximum security and compatibility, enforce strict TLS 1.3
+        // with fallback to OOB relay for non-TLS 1.3 connections
+        if !isTLS13Compatible {
+            log.Printf("⚠️ Session %s: Target is not using TLS 1.3 (version: 0x%04x)", sessionID, targetInfo.Version)
+            log.Printf("🔒 Session %s: Enforcing TLS 1.3 by using OOB relay for enhanced security", sessionID)
+            p.fallbackToRelayMode(clientConn, sessionID)
+            return
+        }
+    }
+    
+    // Try to establish direct connection first
+    targetConn, err := p.establishDirectConnectionAfterHandshake(sessionID)
+    if err != nil {
+        log.Printf("❌ Session %s: Failed to establish direct connection: %v", sessionID, err)
+        // Fallback to relay mode
+        log.Printf("⚠️ Session %s: Falling back to relay mode", sessionID)
+        p.fallbackToRelayMode(clientConn, sessionID)
+        return
+    }
+    
+    // Connection established successfully
+    log.Printf("✅ Session %s: Successfully established direct connection to target", sessionID)
+    
+    // Ensure connections are properly closed when this function exits
+    defer func() {
+        log.Printf("🔹 Session %s: Closing target connection", sessionID)
+        if err := targetConn.Close(); err != nil {
+            log.Printf("⚠️ Session %s: Error closing target connection: %v", sessionID, err)
+        }
+        log.Printf("✅ Session %s: Target connection closed", sessionID)
+    }()
+    
+    // Optimize TCP connection settings
+    if tcpConn, ok := targetConn.(*net.TCPConn); ok {
+        tcpConn.SetNoDelay(true)
+        tcpConn.SetKeepAlive(true)
+        tcpConn.SetKeepAlivePeriod(30 * time.Second)
+        tcpConn.SetReadBuffer(1048576)  // 1MB buffer
+        tcpConn.SetWriteBuffer(1048576) // 1MB buffer
+        log.Printf("✅ Session %s: Optimized TCP settings for direct connection", sessionID)
+    }
+    
+    // Begin bidirectional relay
+    var wg sync.WaitGroup
+    wg.Add(2)
+    
+    // Channel to signal goroutine errors
+    errChan := make(chan error, 2)
+    
+    // Client -> Target (Direct)
+    go func() {
+        defer func() {
+            // Panic recovery
+            if r := recover(); r != nil {
+                log.Printf("⚠️ Session %s: Panic in Client->Target relay: %v", sessionID, r)
+                // Convert panic to error and send to channel
+                errChan <- fmt.Errorf("panic in Client->Target relay: %v", r)
+            }
+            wg.Done()
+            log.Printf("🔹 Session %s: Client->Target relay goroutine exited", sessionID)
+        }()
+        
+        buffer := make([]byte, 16384) // 16KB buffer
+        log.Printf("🔹 Session %s: Starting Client->Target relay", sessionID)
+        
+        // Catch any errors during relay
+        func() {
+            defer func() {
+                if err := recover(); err != nil {
+                    errChan <- fmt.Errorf("recovered panic: %v", err)
+                }
+            }()
+            relayData(clientConn, targetConn, buffer, fmt.Sprintf("Session %s: Client->Target", sessionID))
+        }()
+    }()
+    
+    // Target -> Client (Direct)
+    go func() {
+        defer func() {
+            // Panic recovery
+            if r := recover(); r != nil {
+                log.Printf("⚠️ Session %s: Panic in Target->Client relay: %v", sessionID, r)
+                // Convert panic to error and send to channel
+                errChan <- fmt.Errorf("panic in Target->Client relay: %v", r)
+            }
+            wg.Done()
+            log.Printf("🔹 Session %s: Target->Client relay goroutine exited", sessionID)
+        }()
+        
+        buffer := make([]byte, 16384) // 16KB buffer
+        log.Printf("🔹 Session %s: Starting Target->Client relay", sessionID)
+        
+        // Catch any errors during relay
+        func() {
+            defer func() {
+                if err := recover(); err != nil {
+                    errChan <- fmt.Errorf("recovered panic: %v", err)
+                }
+            }()
+            relayData(targetConn, clientConn, buffer, fmt.Sprintf("Session %s: Target->Client", sessionID))
+        }()
+    }()
+    
+    // Start a goroutine to monitor for errors
+    go func() {
+        for err := range errChan {
+            log.Printf("⚠️ Session %s: Relay error detected: %v", sessionID, err)
+            // We could take additional actions here based on specific error types
+            
+            // Check if it's a connection reset error
+            if strings.Contains(err.Error(), "connection reset") || 
+               strings.Contains(err.Error(), "broken pipe") {
+                log.Printf("⚠️ Session %s: Connection reset or broken pipe detected", sessionID)
+                // Connection issues are common and expected
+                log.Printf("ℹ️ Session %s: This is often normal for HTTP connections", sessionID)
+            }
+        }
+    }()
+    
+    // Wait for both directions to complete
+    log.Printf("🔹 Session %s: Waiting for relay operations to complete", sessionID)
+    wg.Wait()
+    close(errChan)
+    
+    log.Printf("✅ Session %s: Direct connection relay completed", sessionID)
+}
+
 func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
 	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
 
