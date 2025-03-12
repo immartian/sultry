@@ -9,12 +9,13 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	LocalProxyAddr   string             `json:"local_proxy_addr"`
-	RelayPort        int                `json:"relay_port"`
-	CoverSNI         string             `json:"cover_sni,omitempty"`
-	OOBChannels      []OOBChannelConfig `json:"oob_channels"` // Changed from []OOBChannel
-	PrioritizeSNI    bool               `json:"prioritize_sni_concealment"`
-	HandshakeTimeout int                `json:"handshake_timeout,omitempty"`
+	LocalProxyAddr           string             `json:"local_proxy_addr"`
+	RelayPort                int                `json:"relay_port"`
+	CoverSNI                 string             `json:"cover_sni,omitempty"`
+	OOBChannels              []OOBChannelConfig `json:"oob_channels"` // Changed from []OOBChannel
+	PrioritizeSNI            bool               `json:"prioritize_sni_concealment"`
+	FullClientHelloConcealment bool               `json:"full_clienthello_concealment"`
+	HandshakeTimeout         int                `json:"handshake_timeout,omitempty"`
 }
 
 // LoadConfig reads the configuration from the specified file.

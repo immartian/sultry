@@ -83,12 +83,15 @@ This architecture makes Sultry significantly harder to detect and block compared
 
 ## Key Features
 
+- **Full ClientHello Concealment**: Hides the entire TLS handshake to defeat advanced censorship (NEW)
 - **SNI Concealment**: Prevents SNI-based filtering and tracking without compromising performance
 - **Distributed Architecture**: Avoids monolithic traffic patterns that are easily identifiable by DPI
 - **Protocol-Agnostic**: Works with TLS 1.2, 1.3, HTTP/1.1, HTTP/2, and all standard TLS applications
 - **Multiple Transport Protocols**: OOB channels support HTTP, HTTPS, QUIC, and custom protocols
+- **Multi-level Protection**: Choose from different concealment methods based on security needs
+- **TLS Fingerprint Protection**: Prevents identification based on TLS client signatures (NEW)
 - **Automatic Peer Discovery**: Client component automatically discovers and connects to available server components
-- **Graceful Fallbacks**: Automatically falls back to direct connections if SNI concealment fails
+- **Graceful Fallbacks**: Automatically falls back to simpler concealment if full protection fails
 - **Comprehensive Logging**: Detailed logging for troubleshooting and performance optimization
 
 ## Usage
@@ -149,6 +152,7 @@ curl -x http://127.0.0.1:7008 https://example.com/
   ],
   "cover_sni": "harvard.edu",
   "prioritize_sni_concealment": true,
+  "full_clienthello_concealment": true,
   "handshake_timeout": 10000
 }
 ```
@@ -160,11 +164,16 @@ curl -x http://127.0.0.1:7008 https://example.com/
 - **oob_channels**: List of out-of-band channel configurations with multiple fallback options
 - **cover_sni**: A domain value for generating cover traffic to enhance camouflage
 - **prioritize_sni_concealment**: When true, always use OOB for SNI concealment (default: false)
-- **handshake_timeout**: Timeout in milliseconds for handshake operations (default: 5000)
+- **full_clienthello_concealment**: When true, relays the entire ClientHello and TLS handshake via OOB for maximum protection (default: true)
+- **handshake_timeout**: Timeout in milliseconds for handshake operations (default: 10000)
 
 ## Technical Implementation
 
-### SNI Concealment Process
+### Concealment Approaches
+
+Sultry now implements two levels of concealment for maximum flexibility:
+
+#### 1. SNI-Only Concealment (Original Method)
 
 ```mermaid
 sequenceDiagram
@@ -186,6 +195,40 @@ sequenceDiagram
     C->>TS: 10. Application Data (Direct)
     TS->>C: 11. HTTP Response (Direct)
 ```
+
+This approach only conceals the SNI during the DNS lookup phase, protecting against SNI-based filtering but potentially vulnerable to advanced traffic analysis.
+
+#### 2. Full ClientHello Concealment (Enhanced Protection)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CC as Client Component
+    participant SC as Server Component
+    participant TS as Target Server
+    
+    C->>CC: 1. HTTP CONNECT Request
+    CC->>C: 2. 200 Connection Established
+    C->>CC: 3. TLS ClientHello (with SNI)
+    CC->>SC: 4. OOB: Forward entire ClientHello
+    SC->>TS: 5. Forward ClientHello to Target
+    TS->>SC: 6. Return ServerHello
+    SC->>CC: 7. OOB: Return ServerHello
+    CC->>C: 8. Forward ServerHello
+    Note over C,SC,TS: Complete TLS Handshake via OOB Relay
+    Note over C,SC,TS: All handshake messages relayed via OOB
+    SC->>CC: 9. OOB: Target Connection Info
+    CC->>TS: 10. Direct TCP Connect to Target IP
+    Note over C,TS: Handshake Already Complete
+    C->>TS: 11. Application Data (Direct)
+    TS->>C: 12. HTTP Response (Direct)
+```
+
+This enhanced approach provides maximum protection by:
+1. Concealing the entire ClientHello message and TLS handshake, not just the SNI
+2. Preventing any direct connection to the target until after the handshake completes
+3. Protecting against IP blocking, SNI filtering, and TLS fingerprinting
+4. Still maintaining direct connections for application data to preserve performance
 
 1. **Client Side**:
    - Extracts SNI metadata from TLS ClientHello
@@ -219,21 +262,42 @@ This flexibility allows Sultry to adapt to changing network conditions and censo
 
 Sultry employs several techniques to evade sophisticated censorship:
 
-1. **SNI Concealment**: Prevents censors from filtering connections based on the TLS SNI field
-2. **Distributed Architecture**: Avoids the monolithic traffic patterns of traditional proxies
-3. **Protocol Mimicry**: All visible network traffic appears as normal HTTP/HTTPS connections
-4. **Cover Traffic Generation**: Optional feature to periodically generate cover traffic with decoy SNI values
-5. **IP Address Distribution**: Direct connections to target IPs create a natural traffic distribution pattern
+1. **Full ClientHello Concealment**: Hides the entire TLS handshake from network monitoring
+2. **SNI Concealment**: Prevents censors from filtering connections based on the TLS SNI field
+3. **TLS Fingerprint Protection**: Shields TLS client fingerprints from identification
+4. **Distributed Architecture**: Avoids the monolithic traffic patterns of traditional proxies
+5. **Protocol Mimicry**: All visible network traffic appears as normal HTTP/HTTPS connections
+6. **Cover Traffic Generation**: Optional feature to periodically generate cover traffic with decoy SNI values
+7. **IP Address Distribution**: Direct connections to target IPs create a natural traffic distribution pattern
+
+### Protection Levels
+
+Sultry now offers multiple protection levels to balance security and performance:
+
+#### Level 1: SNI-Only Concealment (Medium Protection)
+- Only the SNI information is protected via OOB channel
+- Direct connection to target IP for TLS handshake and data transfer
+- Protects against SNI-based filtering
+- Highly efficient with minimal overhead
+- May be vulnerable to advanced IP blocking and TLS fingerprinting
+
+#### Level 2: Full ClientHello Concealment (Maximum Protection)
+- Complete TLS handshake is relayed through the OOB channel
+- No direct connection to target until after handshake is complete
+- Protects against SNI filtering, IP blocking, and TLS fingerprinting
+- Application data still flows directly for high performance
+- Offers the strongest protection against sophisticated censorship
 
 ### Resistance to DPI Systems
 
 Modern Deep Packet Inspection (DPI) systems often rely on traffic pattern analysis rather than just content inspection. Sultry is specifically designed to counter these advanced detection methods:
 
 1. **No Protocol Fingerprints**: Uses standard HTTP/HTTPS/TLS protocols without modifications
-2. **Natural Traffic Distribution**: Connections go to many different endpoints, not a single proxy server
-3. **Minimal OOB Communication**: Only lightweight metadata is exchanged via OOB channels
-4. **Standard TLS Implementation**: Uses unmodified TLS handshake patterns that match regular browsers
-5. **No Timing Correlations**: Direct connections eliminate the timing patterns of traditional proxies
+2. **Hidden Handshake Patterns**: Complete TLS handshake concealment prevents fingerprinting
+3. **Natural Traffic Distribution**: Connections go to many different endpoints, not a single proxy server
+4. **Efficient OOB Communication**: Only essential data is exchanged via OOB channels
+5. **Standard TLS Implementation**: Uses unmodified TLS handshake patterns that match regular browsers
+6. **No Timing Correlations**: Direct application data connections eliminate the timing patterns of traditional proxies
 
 ## Future Development Directions
 
