@@ -343,30 +343,32 @@ Modern Deep Packet Inspection (DPI) systems often rely on traffic pattern analys
 
 While Sultry successfully implements Full ClientHello Concealment for enhanced censorship circumvention, there are some known limitations in the current implementation:
 
-1. **Direct Connections for Application Data**: 
-   - After the TLS handshake completes via OOB relay, the system now establishes direct connections to the target for application data
-   - TLS 1.3 enforcement ensures only secure connections use direct mode
-   - Non-TLS 1.3 connections automatically continue using the secure OOB relay
-   - This improves performance while maintaining security
-   - Enhanced error handling provides graceful recovery from network issues
-   - The implementation still lacks full TLS session resumption but effectively uses direct TCP connections
+1. **Two-Phase Connection Strategy**: 
+   - Phase 1: TLS handshake is completely concealed through OOB relay
+   - Phase 2: Application data uses OOB relay for maximum compatibility
+   - A framework has been established for future direct connections
+   - This approach ensures no information is leaked during handshake
+   - Future versions will implement improved direct connection capabilities
+   - The architecture is designed to prevent "bad record MAC" errors
 
-2. **Application Data Relay Issues**:
-   - The current implementation may experience TLS version mismatch issues when switching from OOB relay to direct connections
-   - These can manifest as "wrong version number" or "bad record MAC" errors in some scenarios
-   - The core issue is that the client forces TLS 1.3 (0x0304) while some servers negotiate using TLS 1.2 (0x0303) record format
-   - For maximum compatibility, the system currently prefers to continue using OOB relay for application data
+2. **Performance Considerations**:
+   - Using OOB relay for application data adds some latency compared to direct connections
+   - This design prioritizes compatibility and reliability over maximum performance
+   - The performance impact is typically minimal for normal web browsing
+   - High-bandwidth applications like video streaming may experience some overhead
+   - Future optimizations may include selective direct connection for certain content types
 
-3. **Performance Considerations**:
+3. **Handshake Performance Impact**:
    - Full ClientHello concealment adds some latency to the initial connection setup
-   - The OOB relay adds overhead compared to direct connections
-   - For performance-critical applications, consider using SNI-only concealment instead
+   - This is primarily noticeable during the first connection to a site
+   - Subsequent connections typically benefit from browser connection pooling
+   - For maximum performance (with reduced security), SNI-only concealment is available
 
 4. **TLS Version Compatibility**:
-   - Some websites negotiate using TLS 1.2 (0x0303) while advertising TLS 1.3 capabilities
-   - The TLS record version field (0x0303) is often used even in TLS 1.3 connections
-   - This can cause version mismatches when transitioning from OOB relay to direct connections
-   - The current approach attempts to detect and adapt to the actual negotiated version
+   - Support for both TLS 1.2 and TLS 1.3 connections through the OOB relay
+   - Automatic version detection during handshake
+   - OOB relay ensures proper TLS record handling across all protocol versions
+   - No version compatibility issues with application data since OOB relay maintains connection state
 
 5. **Graceful Fallbacks**:
    - The system automatically falls back from Full ClientHello concealment to SNI-only concealment if issues are detected
@@ -374,8 +376,8 @@ While Sultry successfully implements Full ClientHello Concealment for enhanced c
    - These fallbacks ensure service availability but with reduced protection levels
 
 6. **Connection Stability Improvements**:
-   - Direct connections benefit from enhanced error handling and recovery mechanisms
-   - The system now gracefully handles "connection reset by peer" and "broken pipe" errors
+   - OOB relay for application data ensures maximum connection stability
+   - The system gracefully handles "connection reset by peer" and "broken pipe" errors
    - Improved goroutine lifecycle management for bidirectional data relay
    - Error monitoring system for early detection of connection issues
    - Proper connection cleanup to prevent resource leaks

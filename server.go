@@ -68,6 +68,7 @@ func server(config *Config) {
 	http.HandleFunc("/get_response", handleGetResponse)             // New endpoint for getting server responses
 	http.HandleFunc("/send_data", handleSendData)                   // New endpoint for sending client data
 	http.HandleFunc("/create_connection", handleCreateConnection)   // New endpoint for simplified SNI concealment
+	http.HandleFunc("/tunnel", handleTunnel)                        // New endpoint for direct TCP tunneling
 
 	// Log all registered routes
 	log.Println("📌 Registered HTTP handlers:")
@@ -686,9 +687,12 @@ func handleAdoptConnection(w http.ResponseWriter, r *http.Request) {
 	
 	// This is the initial HTTP response to the CONNECT request, which happens BEFORE the TLS handshake
 	// So it's safe to send HTTP here
+	
+	// Include TLS version information in headers for client to use
 	responseStr := "HTTP/1.1 200 OK\r\n" +
 		"Connection: keep-alive\r\n" +
 		"X-Proxy-Status: Direct-Connection-Established\r\n" +
+		"X-Protocol: " + tlsVersion + "\r\n" +
 		"\r\n"
 
 	if _, err := bufrw.WriteString(responseStr); err != nil {
@@ -1207,6 +1211,237 @@ func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 	log.Printf("✅ Sent target info for session %s: %s:%d", sessionID, targetHost, targetPort)
+}
+
+// handleTunnel provides direct TCP tunneling between client and target
+func handleTunnel(w http.ResponseWriter, r *http.Request) {
+    // Extract session ID from header
+    sessionID := r.Header.Get("X-Session-ID")
+    if sessionID == "" {
+        log.Printf("❌ Missing X-Session-ID header in tunnel request")
+        http.Error(w, "X-Session-ID header is required", http.StatusBadRequest)
+        return
+    }
+
+    log.Printf("🔹 Received tunnel request for session %s", sessionID)
+
+    // Get the session
+    sessionsMu.Lock()
+    session, exists := sessions[sessionID]
+    sessionsMu.Unlock()
+
+    if !exists || session.TargetConn == nil {
+        log.Printf("❌ Session %s not found or invalid for tunnel", sessionID)
+        http.Error(w, fmt.Sprintf("Session %s not found or invalid", sessionID), http.StatusNotFound)
+        return
+    }
+
+    // Check if handshake is complete
+    if !session.HandshakeComplete {
+        log.Printf("❌ Handshake not complete for session %s, rejecting tunnel", sessionID)
+        http.Error(w, fmt.Sprintf("Handshake not complete for session %s", sessionID), http.StatusBadRequest)
+        return
+    }
+
+    log.Printf("✅ Handshake confirmed complete for session %s, proceeding with tunnel", sessionID)
+
+    // Hijack the HTTP connection
+    hj, ok := w.(http.Hijacker)
+    if !ok {
+        log.Printf("❌ Server doesn't support hijacking for session %s", sessionID)
+        http.Error(w, "Server doesn't support hijacking", http.StatusInternalServerError)
+        return
+    }
+    log.Printf("🔹 Hijacking HTTP connection for tunnel session %s", sessionID)
+
+    clientConn, bufrw, err := hj.Hijack()
+    if err != nil {
+        log.Printf("❌ Hijacking failed for tunnel session %s: %v", sessionID, err)
+        http.Error(w, fmt.Sprintf("Hijacking failed: %v", err), http.StatusInternalServerError)
+        return
+    }
+    log.Printf("✅ Successfully hijacked HTTP connection for tunnel session %s", sessionID)
+
+    // Mark session as adopted
+    session.mu.Lock()
+    session.Adopted = true
+    session.mu.Unlock()
+    log.Printf("✅ Session %s marked as adopted for tunneling", sessionID)
+
+    // Send HTTP 200 OK
+    responseStr := "HTTP/1.1 200 OK\r\n" +
+        "Connection: keep-alive\r\n" +
+        "X-Proxy-Status: Tunnel-Established\r\n" +
+        "\r\n"
+
+    if _, err := bufrw.WriteString(responseStr); err != nil {
+        log.Printf("❌ ERROR writing tunnel response: %v", err)
+        clientConn.Close()
+        return
+    }
+
+    if err := bufrw.Flush(); err != nil {
+        log.Printf("❌ ERROR flushing buffer: %v", err)
+        clientConn.Close()
+        return
+    }
+    log.Printf("✅ Sent 200 OK response for tunnel session %s", sessionID)
+
+    // Optimize TCP settings for the tunnel
+    if tcpConn, ok := session.TargetConn.(*net.TCPConn); ok {
+        tcpConn.SetNoDelay(true)
+        tcpConn.SetKeepAlive(true)
+        tcpConn.SetKeepAlivePeriod(30 * time.Second)
+        tcpConn.SetReadBuffer(1048576)  // 1MB buffer
+        tcpConn.SetWriteBuffer(1048576) // 1MB buffer
+    }
+    if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+        tcpConn.SetNoDelay(true)
+        tcpConn.SetKeepAlive(true)
+        tcpConn.SetKeepAlivePeriod(30 * time.Second)
+        tcpConn.SetReadBuffer(1048576)  // 1MB buffer
+        tcpConn.SetWriteBuffer(1048576) // 1MB buffer
+    }
+
+    log.Printf("✅ Connection ready for bidirectional tunnel (session %s)", sessionID)
+
+    // Start bidirectional relay in a separate goroutine
+    go func() {
+        log.Printf("✅ Starting bidirectional tunnel relay for session %s", sessionID)
+
+        // Enable graceful shutdown behavior to handle connection resets
+        defer func() {
+            if r := recover(); r != nil {
+                log.Printf("❌ PANIC in tunnel relay: %v", r)
+            }
+
+            // Close connections
+            if session.TargetConn != nil {
+                session.TargetConn.Close()
+            }
+            if clientConn != nil {
+                clientConn.Close()
+            }
+            log.Printf("✅ Tunnel connections closed for session %s", sessionID)
+
+            // Clean up session
+            sessionsMu.Lock()
+            delete(sessions, sessionID)
+            sessionsMu.Unlock()
+            log.Printf("✅ Cleaned up session %s after tunnel completion", sessionID)
+        }()
+
+        // Use wait group for the two copy operations
+        var wg sync.WaitGroup
+        wg.Add(2)
+
+        // Client -> Target relay
+        go func() {
+            defer wg.Done()
+            buffer := make([]byte, 1048576) // 1MB buffer
+            var totalBytes int64
+
+            for {
+                // Read from client with timeout
+                clientConn.SetReadDeadline(time.Now().Add(120 * time.Second))
+                nr, err := clientConn.Read(buffer)
+                clientConn.SetReadDeadline(time.Time{})
+
+                if err != nil {
+                    if err == io.EOF || strings.Contains(err.Error(), "use of closed") {
+                        log.Printf("🔹 Client closed tunnel connection (normal)")
+                    } else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+                        log.Printf("🔹 Client read timeout, continuing tunnel...")
+                        continue
+                    } else {
+                        log.Printf("❌ Tunnel: Client->Target relay error: %v", err)
+                    }
+                    break
+                }
+
+                if nr > 0 {
+                    log.Printf("🔹 TUNNEL: Client->Target: Read %d bytes", nr)
+
+                    // Write to target with timeout
+                    session.TargetConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+                    nw, err := session.TargetConn.Write(buffer[:nr])
+                    session.TargetConn.SetWriteDeadline(time.Time{})
+                    if err != nil {
+                        log.Printf("❌ Tunnel: Client->Target relay error writing: %v", err)
+                        break
+                    }
+
+                    if nw != nr {
+                        log.Printf("⚠️ Tunnel: Short write to target %d/%d bytes", nw, nr)
+                    } else {
+                        log.Printf("✅ Tunnel: Client->Target: Successfully forwarded %d bytes", nw)
+                    }
+
+                    totalBytes += int64(nw)
+                }
+            }
+
+            log.Printf("🔹 Tunnel: Client->Target relay finished: %d bytes total", totalBytes)
+        }()
+
+        // Target -> Client relay
+        go func() {
+            defer wg.Done()
+            buffer := make([]byte, 1048576) // 1MB buffer
+            var totalBytes int64
+
+            for {
+                // Read from target with timeout
+                session.TargetConn.SetReadDeadline(time.Now().Add(120 * time.Second))
+                nr, err := session.TargetConn.Read(buffer)
+                session.TargetConn.SetReadDeadline(time.Time{})
+
+                if err != nil {
+                    if err == io.EOF || strings.Contains(err.Error(), "use of closed") {
+                        log.Printf("🔹 Target closed tunnel connection (normal)")
+                    } else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+                        log.Printf("🔹 Target read timeout, continuing tunnel...")
+                        continue
+                    } else {
+                        log.Printf("❌ Tunnel: Target->Client relay error: %v", err)
+                    }
+                    break
+                }
+
+                if nr > 0 {
+                    log.Printf("🔹 TUNNEL: Target->Client: Read %d bytes", nr)
+
+                    // Write to client with timeout
+                    clientConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+                    nw, err := clientConn.Write(buffer[:nr])
+                    clientConn.SetWriteDeadline(time.Time{})
+                    if err != nil {
+                        if strings.Contains(err.Error(), "broken pipe") ||
+                            strings.Contains(err.Error(), "use of closed") {
+                            log.Printf("ℹ️ Client tunnel connection closed, stopping relay gracefully")
+                            return
+                        }
+                        log.Printf("❌ Tunnel: Target->Client relay error writing: %v", err)
+                        break
+                    }
+
+                    if nw != nr {
+                        log.Printf("⚠️ Tunnel: Short write to client %d/%d bytes", nw, nr)
+                    } else {
+                        log.Printf("✅ Tunnel: Target->Client: Successfully forwarded %d bytes", nw)
+                    }
+
+                    totalBytes += int64(nw)
+                }
+            }
+
+            log.Printf("🔹 Tunnel: Target->Client relay finished: %d bytes total", totalBytes)
+        }()
+
+        // Wait for both directions to complete
+        wg.Wait()
+        log.Printf("✅ Bidirectional tunnel completed for session %s", sessionID)
+    }()
 }
 
 // Handler for releasing OOB resources

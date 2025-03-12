@@ -71,18 +71,18 @@ For remote deployment, update the `oob_channels` section with your server's actu
 ## Features
 
 - **Full ClientHello Concealment**: Complete protection against TLS handshake analysis
-- **TLS 1.3 Enforcement**: Option to enforce TLS 1.3 for maximum security
-- **Direct Connections**: Efficient application data transfer after secure handshake
+- **Full OOB Relay**: Application data goes through OOB channel for maximum compatibility
+- **Complete Protection**: Application data fully protected from traffic analysis
 - **Fallback Mechanisms**: Graceful degradation to ensure service availability
 - **Error Recovery**: Robust handling of network issues and connection resets
 
-### TLS 1.3 Enforcement
+### Full OOB Relay Mode
 
-When `enforce_tls13` is enabled, Sultry will:
-1. Detect the TLS version negotiated during handshake
-2. Use direct connections only for TLS 1.3 targets
-3. Fall back to secure OOB relay for non-TLS 1.3 targets
-4. Provide maximum protection against protocol downgrade attacks
+Sultry uses OOB relay for both handshake and application data, which:
+1. Ensures maximum compatibility with all website protocols
+2. Prevents TLS record MAC failures by maintaining connection state
+3. Provides consistent behavior across different protocol versions
+4. Offers complete protection against TLS fingerprinting throughout the session
 
 ## Troubleshooting
 

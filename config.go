@@ -17,6 +17,7 @@ type Config struct {
 	FullClientHelloConcealment bool               `json:"full_clienthello_concealment"`
 	HandshakeTimeout         int                `json:"handshake_timeout,omitempty"`
 	EnforceTLS13             bool               `json:"enforce_tls13,omitempty"`
+	UseOOBForApplicationData bool               `json:"use_oob_for_application_data,omitempty"`
 }
 
 // LoadConfig reads the configuration from the specified file.

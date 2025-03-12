@@ -18,13 +18,14 @@ import (
 
 // TargetInfo holds information about the target server
 type TargetInfo struct {
-	TargetHost    string `json:"target_host"`
-	TargetIP      string `json:"target_ip"`
-	TargetPort    int    `json:"target_port"`
-	SNI           string `json:"sni"`
-	SessionTicket []byte `json:"session_ticket"`
-	MasterSecret  []byte `json:"master_secret"`
-	Version       int    `json:"tls_version"`
+	TargetHost    string   `json:"target_host"`
+	TargetIP      string   `json:"target_ip"`
+	TargetPort    int      `json:"target_port"`
+	SNI           string   `json:"sni"`
+	SessionTicket []byte   `json:"session_ticket"`
+	MasterSecret  []byte   `json:"master_secret"`
+	Version       int      `json:"tls_version"`
+	ALPN          string   `json:"alpn_protocol"`  // The negotiated ALPN protocol (h2, http/1.1, etc.)
 }
 
 // DirectConnectCommand is the command sent to clients
@@ -1734,6 +1735,151 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 	log.Printf("✅ %s: Relay complete, %d bytes transferred", label, totalBytes)
 }
 
+// signalConnectionAdoption would signal to the OOB server that the client is taking over 
+// the existing connection for direct data exchange. Currently not implemented.
+/*
+func (p *TLSProxy) signalConnectionAdoption(sessionID string) error {
+	log.Printf("🔹 Signaling connection adoption for session %s", sessionID)
+	
+	// Create a simple request to the OOB server to signal adoption
+	serverAddr := p.OOB.GetServerAddress()
+	url := fmt.Sprintf("http://%s/adopt_connection", serverAddr)
+	
+	jsonData := map[string]string{
+		"session_id": sessionID,
+		"action":     "adopt",
+	}
+	
+	jsonBytes, err := json.Marshal(jsonData)
+	if err != nil {
+		return err
+	}
+	
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return err
+	}
+	
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned non-OK status: %d", resp.StatusCode)
+	}
+	
+	// Read all headers from the response
+	for name, values := range resp.Header {
+		for _, value := range values {
+			log.Printf("🔹 Response header: %s: %s", name, value)
+		}
+	}
+	
+	log.Printf("✅ Server confirmed connection adoption")
+	return nil
+}
+
+// directDataExchange would establish a bidirectional tunnel for post-handshake data
+// using the server's existing connection to the target. Currently not implemented.
+func (p *TLSProxy) directDataExchange(clientConn net.Conn, sessionID string) error {
+	log.Printf("🔹 Setting up bidirectional tunnel for session %s", sessionID)
+	
+	// Connect to the OOB server on the relay port
+	serverAddr := p.OOB.GetServerAddress()
+	relayConn, err := net.DialTimeout("tcp", serverAddr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to relay server: %v", err)
+	}
+	
+	// Send adoption tunnel request
+	request := fmt.Sprintf("POST /tunnel HTTP/1.1\r\n"+
+		"Host: %s\r\n"+
+		"Connection: upgrade\r\n"+
+		"Upgrade: TCP/Relay\r\n"+
+		"X-Session-ID: %s\r\n"+
+		"Content-Length: 0\r\n\r\n", 
+		serverAddr, sessionID)
+	
+	if _, err := relayConn.Write([]byte(request)); err != nil {
+		relayConn.Close()
+		return fmt.Errorf("failed to send tunnel request: %v", err)
+	}
+	
+	// Read HTTP response
+	reader := bufio.NewReader(relayConn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		relayConn.Close()
+		return fmt.Errorf("failed to read response: %v", err)
+	}
+	
+	if !strings.Contains(line, "200") {
+		relayConn.Close()
+		return fmt.Errorf("server rejected tunnel: %s", strings.TrimSpace(line))
+	}
+	
+	// Skip headers
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			relayConn.Close()
+			return fmt.Errorf("failed to read headers: %v", err)
+		}
+		
+		if line == "\r\n" {
+			break
+		}
+	}
+	
+	log.Printf("✅ Tunnel established with relay server")
+	
+	// Optimize TCP connection settings
+	if tcpConn, ok := relayConn.(*net.TCPConn); ok {
+		tcpConn.SetNoDelay(true)
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		tcpConn.SetReadBuffer(1048576)  // 1MB buffer
+		tcpConn.SetWriteBuffer(1048576) // 1MB buffer
+	}
+	
+	// Start bidirectional relay
+	var wg sync.WaitGroup
+	wg.Add(2)
+	
+	// Client -> Target
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ Panic in Client->Target relay: %v", r)
+			}
+		}()
+		
+		buffer := make([]byte, 16384) // 16KB buffer
+		relayData(clientConn, relayConn, buffer, fmt.Sprintf("Session %s: Client->Target", sessionID))
+	}()
+	
+	// Target -> Client
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("❌ Panic in Target->Client relay: %v", r)
+			}
+		}()
+		
+		buffer := make([]byte, 16384) // 16KB buffer
+		relayData(relayConn, clientConn, buffer, fmt.Sprintf("Session %s: Target->Client", sessionID))
+	}()
+	
+	// Wait for both directions to complete
+	wg.Wait()
+	relayConn.Close()
+	
+	log.Printf("✅ Bidirectional tunnel completed for session %s", sessionID)
+	return nil
+}
+*/
+
 // establishDirectConnectionAfterHandshake creates a direct connection to the target
 // after completing the TLS handshake via OOB relay. This function gets connection
 // details from the server component and establishes a direct TCP connection for
@@ -1752,11 +1898,34 @@ func (p *TLSProxy) establishPostHandshakeConnection(clientConn net.Conn, session
         // Determine TLS version
         isTLS13Compatible := targetInfo.Version == 0x0304 // TLS 1.3
         
-        // For maximum security and compatibility, enforce strict TLS 1.3
-        // with fallback to OOB relay for non-TLS 1.3 connections
-        if !isTLS13Compatible {
+        // For TLS 1.3 connections, attempt direct connection via replay attack prevention
+        if isTLS13Compatible {
+            log.Printf("✅ Session %s: TLS 1.3 detected (version: 0x%04x), can use direct connection", sessionID, targetInfo.Version)
+            
+            // Instead of trying to create a new connection to the target,
+            // we need to preserve the TLS session that was established during handshake
+            
+            // The issue with "bad record mac" errors is that we're trying to join 
+            // a TLS session that's already in progress, so instead we'll use a 
+            // modified approach that still allows direct communication
+            
+            log.Printf("🔹 Session %s: Using hybrid approach for TLS 1.3", sessionID)
+            
+            // Signal to the server that we're taking over the connection after
+            // handshake completion - this will transfer the connection to us
+            // Just use OOB relay for now until we implement the tunnel functionality properly
+            log.Printf("⚠️ Session %s: Direct connection not yet fully implemented, using OOB relay", sessionID)
+            p.fallbackToRelayMode(clientConn, sessionID)
+            return
+            
+            // For all other protocols, attempt direct connection
+            log.Printf("🔹 Session %s: Attempting direct connection for HTTP/1.1 over TLS 1.3", sessionID)
+            
+            // This line should never be reached since we're returning above
+        } else {
+            // For non-TLS 1.3 connections, use OOB relay for compatibility and security
             log.Printf("⚠️ Session %s: Target is not using TLS 1.3 (version: 0x%04x)", sessionID, targetInfo.Version)
-            log.Printf("🔒 Session %s: Enforcing TLS 1.3 by using OOB relay for enhanced security", sessionID)
+            log.Printf("🔒 Session %s: Using OOB relay for enhanced security and compatibility", sessionID)
             p.fallbackToRelayMode(clientConn, sessionID)
             return
         }

@@ -27,6 +27,7 @@
     "prioritize_sni_concealment": true,
     "full_clienthello_concealment": true,
     "handshake_timeout": 10000,
-    "enforce_tls13": true
+    "enforce_tls13": true,
+    "use_oob_for_application_data": true
   }
   
