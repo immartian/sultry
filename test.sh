@@ -1,10 +1,25 @@
 #!/bin/bash
 
 # Clear any previous logs
-rm -f *.logs
+rm -f *.log
 
 echo "=== Starting SNI Concealment Test with Direct Connection ==="
 echo "$(date)"
+
+# Make sure go is in the PATH
+export PATH=$PATH:/usr/local/go/bin
+
+# Build Sultry first
+echo "=== Building Sultry ==="
+cd "$(dirname "$0")"
+go build -v .
+BUILD_STATUS=$?
+if [ $BUILD_STATUS -ne 0 ]; then
+    echo "❌ Build failed with exit code $BUILD_STATUS"
+    exit 1
+else
+    echo "✅ Build successful"
+fi
 
 # Set the test domain - use google.com as it will definitely resolve
 TEST_DOMAIN="google.com"
@@ -16,7 +31,6 @@ export PATH=$PATH:/usr/local/go/bin
 # Kill any existing processes
 echo "Killing any existing Sultry processes..."
 pkill -f "sultry" || true
-pkill -f "go run.*--mode" || true
 sleep 2
 
 # Verify ports are free
@@ -33,7 +47,7 @@ fi
 # Start server with explicit logging
 echo "=== Starting server component ==="
 cd "$(dirname "$0")"
-go run . --mode server > test_server.log 2>&1 &
+./sultry --mode server > test_server.log 2>&1 &
 SERVER_PID=$!
 echo "Server started with PID: $SERVER_PID"
 
@@ -58,7 +72,7 @@ fi
 
 # Start client with explicit logging
 echo "=== Starting client component ==="
-go run . --mode client > test_client.log 2>&1 &
+./sultry --mode client > test_client.log 2>&1 &
 CLIENT_PID=$!
 echo "Client started with PID: $CLIENT_PID"
 
@@ -103,9 +117,18 @@ TCPDUMP_PID=$!
 echo "Network monitor started with PID: $TCPDUMP_PID"
 
 # Test connection
-echo "=== Making test request ==="
+echo "=== Making test request (first connection) ==="
 curl -v -x http://127.0.0.1:7008 https://$TEST_DOMAIN > curl_output.log 2>&1
 CURL_EXIT=$?
+
+# Wait a moment for session ticket processing
+sleep 3
+
+# Make a second connection to test session resumption
+echo "=== Making test request (second connection for session resumption) ==="
+curl -v -x http://127.0.0.1:7008 https://$TEST_DOMAIN >> curl_output.log 2>&1
+CURL_EXIT2=$?
+echo "Second curl exit code: $CURL_EXIT2"
 
 # Wait a bit for monitoring
 sleep 5
@@ -140,9 +163,9 @@ fi
 
 # Check for direct connection establishment
 echo "=== Checking direct connection establishment ==="
-if grep -q "Direct connection established" test_client.log; then
+if grep -q "Established direct connection to" test_client.log; then
     echo "✅ DIRECT CONNECTION ESTABLISHED"
-    grep -A 2 "Direct connection established" test_client.log
+    grep -A 2 "Established direct connection to" test_client.log
     
     # Check for bidirectional relay
     if grep -q "Starting bidirectional relay" test_client.log; then
@@ -157,9 +180,9 @@ fi
 
 # Check for session ticket
 echo "=== Checking session ticket handling ==="
-if grep -q "Session Ticket received" test_client.log || grep -q "Session Ticket received" test_server.log; then
+if grep -q "Session Ticket received" test_client.log || grep -q "Session Ticket received" test_server.log || grep -q "Detected NewSessionTicket" test_client.log; then
     echo "✅ SESSION TICKET DETECTED"
-    grep "Session Ticket" test_client.log test_server.log || true
+    grep -e "Session Ticket" -e "NewSessionTicket" test_client.log test_server.log || true
 else
     echo "❌ NO SESSION TICKET DETECTED"
 fi
@@ -285,7 +308,7 @@ else
 fi
 
 # Check direct connection establishment  
-if grep -q "Direct connection established" test_client.log; then
+if grep -q "Established direct connection to" test_client.log; then
     echo "2. ✅ Direct connection established"
 else
     echo "2. ❌ Direct connection NOT established"

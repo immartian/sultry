@@ -39,6 +39,113 @@ type DirectConnectCommand struct {
 	MasterSecret  []byte `json:"master_secret"`
 }
 
+// Session ticket storage for TLS session resumption
+type SessionTicket struct {
+	Data      []byte    `json:"data"`
+	Timestamp time.Time `json:"timestamp"`
+	SNI       string    `json:"sni"`
+}
+
+var (
+	// Store session tickets by hostname
+	sessionTickets     = make(map[string]*SessionTicket)
+	sessionTicketsMu   sync.RWMutex
+)
+
+// storeSessionTicket stores a session ticket for a given hostname
+func storeSessionTicket(hostname string, data []byte) {
+	if hostname == "" || len(data) == 0 {
+		log.Printf("⚠️ Cannot store session ticket: invalid hostname or data")
+		return
+	}
+
+	sessionTicketsMu.Lock()
+	defer sessionTicketsMu.Unlock()
+
+	// Create a copy of the data to ensure it persists
+	ticketData := make([]byte, len(data))
+	copy(ticketData, data)
+
+	sessionTickets[hostname] = &SessionTicket{
+		Data:      ticketData,
+		Timestamp: time.Now(),
+		SNI:       hostname,
+	}
+
+	log.Printf("✅ Stored session ticket for %s (%d bytes)", hostname, len(data))
+}
+
+// hasValidSessionTicket checks if we have a valid session ticket for the given server
+func hasValidSessionTicket(targetServer string) (bool, []byte) {
+	sessionTicketsMu.RLock()
+	defer sessionTicketsMu.RUnlock()
+	
+	ticket, exists := sessionTickets[targetServer]
+	if !exists || ticket == nil || len(ticket.Data) == 0 {
+		return false, nil
+	}
+	
+	// Check if the ticket has expired (24 hours)
+	if time.Since(ticket.Timestamp) > 24*time.Hour {
+		log.Printf("⚠️ Session ticket for %s has expired", targetServer)
+		return false, nil
+	}
+	
+	log.Printf("✅ Found valid session ticket for %s (%d bytes, age: %s)",
+		targetServer, len(ticket.Data), time.Since(ticket.Timestamp))
+	return true, ticket.Data
+}
+
+// relayDataWithSessionTicketDetection relays data and checks for session tickets
+func relayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label string, processData func([]byte)) {
+	defer func() {
+		log.Printf("🔹 %s: Connection closed normally", label)
+	}()
+
+	for {
+		src.SetReadDeadline(time.Now().Add(60 * time.Second))
+		n, err := src.Read(buffer)
+		src.SetReadDeadline(time.Time{}) // Clear deadline
+
+		if err != nil {
+			if err != io.EOF && !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "reset") {
+				log.Printf("❌ %s: Error reading: %v", label, err)
+			}
+			return
+		}
+
+		if n > 0 {
+			// Check for session ticket in the TLS records
+			if n >= 6 && buffer[0] == RecordTypeHandshake && buffer[5] == HandshakeTypeNewSessionTicket {
+				log.Printf("🎫 %s: Detected NewSessionTicket message (%d bytes)", label, n)
+				
+				// Check if we have a handler for this
+				if processData != nil {
+					processData(buffer[:n])
+				}
+			} else if n >= 5 {
+				recordType, version, _, _ := parseTLSRecordHeader(buffer[:n])
+				if recordType >= 20 && recordType <= 24 {
+					log.Printf("🔹 %s: TLS Record: Type=%d, Version=0x%04x, Length=%d/%d",
+						label, recordType, version, n-5, n)
+				}
+				
+				// Call the optional data processor if provided
+				if processData != nil {
+					processData(buffer[:n])
+				}
+			}
+
+			// Write the data
+			_, err := dst.Write(buffer[:n])
+			if err != nil {
+				log.Printf("❌ %s: Error writing: %v", label, err)
+				return
+			}
+		}
+	}
+}
+
 // TLSProxy handles the proxy functionality with multiple connection strategies.
 // It supports several methods to establish connections to target servers:
 //  1. OOB Handshake Relay - For SNI concealment and bypassing network restrictions (primary when SNI concealment is prioritized)
@@ -721,8 +828,15 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		log.Printf("✅ Starting bidirectional relay between client and direct connection")
 		buffer1 := make([]byte, 32768)
 		buffer2 := make([]byte, 32768)
-		go relayData(clientConn, targetConn, buffer1, "client → target")
-		go relayData(targetConn, clientConn, buffer2, "target → client")
+		go relayDataWithSessionTicketDetection(clientConn, targetConn, buffer1, "client → target", nil)
+		go relayDataWithSessionTicketDetection(targetConn, clientConn, buffer2, "target → client", func(data []byte) {
+			// Check for session ticket in data from server to client
+			if isSessionTicketMessage(data) {
+				log.Printf("🎫 Session Ticket received from server for %s", host)
+				// Store the session ticket for future connections
+				storeSessionTicket(host, data)
+			}
+		})
 		
 		return
 
