@@ -179,6 +179,28 @@ For detailed runtime instructions, see [RUNTIME.md](RUNTIME.md).
 
 ## Technical Implementation
 
+### Code Structure
+
+The project is currently organized with a few large files:
+
+- `client.go`: Client-side proxy implementation (2318 lines)
+- `server.go`: Server-side proxy implementation (1761 lines)
+- `config.go`: Configuration handling
+- `utils.go`: TLS utility functions
+- `oob.go`: Out-of-Band communication module
+- `main.go`: Entry point
+
+#### Modular Structure (Future Implementation)
+
+A modular code structure has been designed to improve maintainability. See the `modular` directory for details and migration strategy. The proposed structure breaks down the large files into:
+
+- `relay.go`: Functions for relaying data between connections
+- `handlers.go`: HTTP handler functions for the server component
+- `tunnel.go`: Functions for establishing direct connections after handshake
+- `tls.go`: TLS protocol utilities and constants
+
+This modular approach will make the codebase easier to understand, maintain, and extend.
+
 ### Concealment Approaches
 
 Sultry now implements two levels of concealment for maximum flexibility:
