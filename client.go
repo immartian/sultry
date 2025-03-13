@@ -719,8 +719,10 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		
 		// Start bidirectional relay between client and direct connection
 		log.Printf("✅ Starting bidirectional relay between client and direct connection")
-		go relayData(clientConn, targetConn, "client → target")
-		go relayData(targetConn, clientConn, "target → client")
+		buffer1 := make([]byte, 32768)
+		buffer2 := make([]byte, 32768)
+		go relayData(clientConn, targetConn, buffer1, "client → target")
+		go relayData(targetConn, clientConn, buffer2, "target → client")
 		
 		return
 

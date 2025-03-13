@@ -27,8 +27,8 @@ const (
 	HandshakeTypeNewSessionTicket    = 4
 )
 
-// ParseRecordHeader parses a TLS record header
-func parseRecordHeader(data []byte) (byte, uint16, uint16, error) {
+// parseTLSRecordHeader parses a TLS record header (renamed to avoid conflict)
+func parseTLSRecordHeader(data []byte) (byte, uint16, uint16, error) {
 	if len(data) < 5 {
 		return 0, 0, 0, nil
 	}
@@ -78,13 +78,13 @@ func isSessionTicketMessage(data []byte) bool {
     return data[5] == HandshakeTypeNewSessionTicket
 }
 
-// analyzeHandshakeStatus analyzes TLS message for handshake progress
-func analyzeHandshakeStatus(message []byte) (isHandshake bool, isComplete bool) {
+// analyzeTLSHandshakeStatus analyzes TLS message for handshake progress (renamed to avoid conflict)
+func analyzeTLSHandshakeStatus(message []byte) (isHandshake bool, isComplete bool) {
 	if len(message) < 5 {
 		return false, false
 	}
 
-	recordType, _, _, _ := parseRecordHeader(message)
+	recordType, _, _, _ := parseTLSRecordHeader(message)
 	
 	// Check if this is a handshake record
 	isHandshake = (recordType == RecordTypeHandshake)
@@ -112,7 +112,7 @@ func logTLSRecord(data []byte, label string) {
 		return
 	}
 	
-	recordType, version, msgLen, _ := parseRecordHeader(data)
+	recordType, version, msgLen, _ := parseTLSRecordHeader(data)
 	
 	// Determine record type string
 	typeStr := "Unknown"
