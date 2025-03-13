@@ -706,23 +706,23 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 			// Continue anyway as this is non-critical
 		}
 
-		// For now, continue using OOB relay for all data until we implement proper TLS session resumption
-		log.Printf("🔹 Using OOB relay for application data exchange")
-		p.fallbackToRelayMode(clientConn, sessionID)
+		// Now that handshake is complete, establish direct connection
+		log.Printf("✅ Handshake complete for session %s. Switching to direct connection.", sessionID)
+		targetConn, err := p.establishDirectConnectionAfterHandshake(sessionID)
+		if err != nil {
+			log.Printf("❌ Failed to establish direct connection: %v", err)
+			// Fallback to relay mode
+			log.Printf("⚠️ Falling back to relay mode for session %s", sessionID)
+			p.fallbackToRelayMode(clientConn, sessionID)
+			return
+		}
+		
+		// Start bidirectional relay between client and direct connection
+		log.Printf("✅ Starting bidirectional relay between client and direct connection")
+		go relayData(clientConn, targetConn, "client → target")
+		go relayData(targetConn, clientConn, "target → client")
+		
 		return
-
-		// TODO: Implement proper TLS session resumption
-		/*
-			log.Printf("🔹 Establishing direct connection for application data")
-			targetConn, err = p.establishDirectConnectionAfterHandshake(sessionID)
-			if err != nil {
-				log.Printf("❌ Failed to establish direct connection: %v", err)
-				// Fallback to relay mode
-				log.Printf("⚠️ Falling back to relay mode for session %s", sessionID)
-				p.fallbackToRelayMode(clientConn, sessionID)
-				return
-			}
-		*/
 
 		// Connection was established through the full handshake relay
 		// Skip the ClientHello forwarding since it was already done through OOB

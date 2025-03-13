@@ -599,7 +599,23 @@ func handleCompleteHandshake(w http.ResponseWriter, r *http.Request) {
 
 	// Mark handshake as complete
 	session.HandshakeComplete = true
-	log.Printf("✅ Handshake explicitly marked complete for session %s", req.SessionID)
+	log.Printf("✅ Handshake marked complete for session %s. Releasing connection.", req.SessionID)
+
+	// Close connection after a brief delay to ensure all buffered data is sent
+	go func() {
+		time.Sleep(500 * time.Millisecond) // Ensure state sync before dropping connection
+		
+		if session.TargetConn != nil {
+			session.TargetConn.Close()
+		}
+		
+		// Remove the session to free up resources
+		sessionsMu.Lock()
+		delete(sessions, req.SessionID)
+		sessionsMu.Unlock()
+		
+		log.Printf("🔹 Proxy connection closed for session %s", req.SessionID)
+	}()
 
 	w.WriteHeader(http.StatusOK)
 }
