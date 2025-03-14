@@ -340,16 +340,16 @@ sequenceDiagram
     CC->>C: 8. Forward ServerHello
     Note over C,SC,TS: Complete TLS Handshake via OOB Relay
     Note over C,SC,TS: All handshake messages relayed via OOB
-    SC->>CC: 9. OOB: Target Connection Info
+    CC->>SC: 9. Signal Handshake Completion
     CC->>TS: 10. Direct TCP Connect to Target IP
-    Note over C,TS: Handshake Already Complete
+    Note over CC,TS: Direct connection established
     C->>TS: 11. Application Data (Direct)
     TS->>C: 12. HTTP Response (Direct)
 ```
 
 This enhanced approach provides maximum protection by:
 1. Concealing the entire ClientHello message and TLS handshake, not just the SNI
-2. Preventing any direct connection to the target until after the handshake completes
+2. Preventing direct connection to the target until after handshake completes
 3. Protecting against IP blocking, SNI filtering, and TLS fingerprinting
 4. Still maintaining direct connections for application data to preserve performance
 
@@ -452,48 +452,57 @@ Modern Deep Packet Inspection (DPI) systems often rely on traffic pattern analys
    - Distributed relay network without central coordination
    - Integration with existing mesh networks for maximum resilience
 
-## Known Issues and Limitations
+## Current Implementation Features
 
-While Sultry successfully implements Full ClientHello Concealment for enhanced censorship circumvention, there are some known limitations in the current implementation:
+Sultry implements a two-phase connection strategy that balances privacy and performance:
 
 1. **Two-Phase Connection Strategy**: 
    - Phase 1: TLS handshake is completely concealed through OOB relay
-   - Phase 2: Application data uses OOB relay for maximum compatibility
-   - A framework has been established for future direct connections
-   - This approach ensures no information is leaked during handshake
-   - Future versions will implement improved direct connection capabilities
-   - The architecture is designed to prevent "bad record MAC" errors
+   - Phase 2: Application data flows directly between client and target
+   - This approach ensures handshake information is protected
+   - Direct connection for application data provides optimal performance
+   - Balanced approach to privacy and performance
 
-2. **Performance Considerations**:
-   - Using OOB relay for application data adds some latency compared to direct connections
-   - This design prioritizes compatibility and reliability over maximum performance
-   - The performance impact is typically minimal for normal web browsing
-   - High-bandwidth applications like video streaming may experience some overhead
-   - Future optimizations may include selective direct connection for certain content types
+2. **Network-Based OOB Implementation**:
+   - Full HTTP API for client-server communication
+   - Client and server components can run on different machines
+   - Server listens on all interfaces (0.0.0.0) for external connections
+   - Proper IP address and port configuration for remote operation
+   - Support for both local and distributed deployment models
 
-3. **Handshake Performance Impact**:
-   - Full ClientHello concealment adds some latency to the initial connection setup
-   - This is primarily noticeable during the first connection to a site
-   - Subsequent connections typically benefit from browser connection pooling
-   - For maximum performance (with reduced security), SNI-only concealment is available
+3. **Performance Optimization**:
+   - Direct connections for application data minimize latency
+   - OOB server only handles the handshake phase, reducing server load
+   - No performance bottleneck for high-bandwidth applications
+   - Efficient use of network resources
+   - Balance between security and performance
 
 4. **TLS Version Compatibility**:
-   - Support for both TLS 1.2 and TLS 1.3 connections through the OOB relay
+   - Support for both TLS 1.2 and TLS 1.3 connections
    - Automatic version detection during handshake
-   - OOB relay ensures proper TLS record handling across all protocol versions
-   - No version compatibility issues with application data since OOB relay maintains connection state
+   - OOB relay ensures proper TLS record handling during handshake
+   - Direct connections for application data provide native TLS performance
 
-5. **Graceful Fallbacks**:
-   - The system automatically falls back from Full ClientHello concealment to SNI-only concealment if issues are detected
-   - If SNI-only concealment fails, it falls back to direct connections
-   - These fallbacks ensure service availability but with reduced protection levels
+5. **Deployment Flexibility**:
+   - Support for both local testing (single machine) and distributed deployment
+   - Server component can run on any accessible machine outside censored networks
+   - Client component runs locally on the user's machine
+   - Multiple server instances can be deployed for redundancy
+   - Configuration options for server address and port settings
 
-6. **Connection Stability Improvements**:
-   - OOB relay for application data ensures maximum connection stability
-   - The system gracefully handles "connection reset by peer" and "broken pipe" errors
-   - Improved goroutine lifecycle management for bidirectional data relay
+6. **Connection Management**:
+   - Proper handshake detection ensures reliable transition to direct connections
+   - The system gracefully handles network errors
+   - Improved goroutine lifecycle management for data relay
    - Error monitoring system for early detection of connection issues
    - Proper connection cleanup to prevent resource leaks
+
+7. **Future Enhancements**:
+   - Connection retry mechanism with exponential backoff
+   - Heartbeat functionality to monitor server health
+   - Improved server discovery mechanisms
+   - Load balancing across multiple servers
+   - Enhanced error reporting and diagnostics
 
 Future releases will focus on implementing full TLS session resumption to further improve connection reliability and enhancing application performance through optimized data transfer paths.
 

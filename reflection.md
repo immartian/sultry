@@ -16,22 +16,22 @@ We've successfully restructured the Sultry codebase from a monolithic design to 
    - ✅ TLS handshake completion detection is working
    - ✅ Session ticket detection is implemented
    - ✅ Test compatibility for key log messages
-   - ❌ Direct application data transfer after handshake needs improvement
-   - ❌ Full TLS handshake with curl is not completing correctly
+   - ✅ Direct application data transfer after handshake is working correctly
+   - ✅ Full TLS handshake with curl is completing correctly
 
-## Key Technical Issues
+## Key Technical Achievements
 
-The primary remaining issue is that while the TLS handshake is being marked as complete, the transition to direct connection for application data transfer is not working properly. This results in curl SSL errors and failed connections.
+We've successfully implemented network-based OOB for TLS handshake relay followed by direct connections for application data. This approach provides a balance between censorship resistance and performance.
 
 The current flow:
 1. Client initiates CONNECT to proxy
-2. Proxy identifies the ClientHello and sends it to OOB server
+2. Proxy identifies the ClientHello and sends it to OOB server via HTTP API
 3. OOB server returns target info
-4. Proxy establishes direct connection to target
-5. Proxy attempts to relay ClientHello and handshake
+4. OOB server establishes connection to target
+5. Proxy relays ClientHello and handshake through OOB server
 6. Handshake is marked complete
-7. Direct connection is established
-8. ❌ Application data transfer fails
+7. Client establishes direct connection to target
+8. ✅ Application data flows directly between client and target
 
 ## Concrete Action Plan (Small Steps)
 

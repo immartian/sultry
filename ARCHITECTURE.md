@@ -49,12 +49,13 @@ The server-side proxy is responsible for:
 
 The OOB module handles communication between client and server components:
 
-1. Direct function calls when components are in the same process (primary mode)
-2. Optional HTTP-based protocols for distributed deployment
+1. Direct function calls when components are in the same process (local mode)
+2. HTTP-based API for distributed deployment (network mode)
 3. Session management and synchronization
 4. Target server discovery and resolution
+5. Full application data relay
 
-The DirectOOB implementation eliminates network overhead when components run locally by using direct function calls instead of HTTP API requests.
+The DirectOOB implementation eliminates network overhead when components run locally by using direct function calls instead of HTTP API requests. The HTTPOOBClient implementation enables client-server communication over a network, allowing distributed deployment with the client and server components running on different machines.
 
 ## Connection Flows
 
@@ -94,10 +95,20 @@ The DirectOOB implementation eliminates network overhead when components run loc
     │                    │                   │   Connection          │
     │                    │                   │──────────────────────►│
     │                    │                   │                       │
-    │ 10. Application Data (Direct TLS Relay)│                       │
-    │───────────────────────────────────────────────────────────────►│
+    │ 10. Signal Handshake   │                   │                       │
+    │    Completion       │                   │                       │
+    │                    │───────────────────►                       │
+    │                    │                   │ 11. Release Server    │
+    │                    │                   │    Connection         │
     │                    │                   │                       │
-    │◄──────────────────────────────────────────────────────────────│
+    │ 12. Direct TCP Connect to Target IP    │                       │
+    │─────────────────────────────────────────────────────────────► │
+    │                    │                   │                       │
+    │ 13. Application Data (Direct)          │                       │
+    │─────────────────────────────────────────────────────────────► │
+    │                    │                   │                       │
+    │ 14. Target Response (Direct)           │                       │
+    │◄─────────────────────────────────────────────────────────────┘
 ```
 
 #### Optional Distributed Mode with HTTP API
@@ -118,7 +129,7 @@ When client and server components are deployed on different machines, the system
     ...
 ```
 
-### Direct Connection Establishment
+### Direct Connection for Application Data
 
 ```
 ┌────────┐          ┌────────┐          ┌────────┐
