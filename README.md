@@ -141,9 +141,10 @@ The key innovation in Sultry is its distributed connection model:
    - Client establishes direct connections to target IPs
    - No proxying of actual TLS handshake or application data
 
-2. **Direct Connection Flow**:
-   - After SNI resolution, client connects directly to the target server's IP
-   - All TLS handshake and application data flows directly between client and target
+2. **Two-Phase Connection Model**:
+   - Phase 1: TLS handshake is fully relayed via OOB server (increased protection)
+   - Phase 2: After handshake completion, client connects directly to the target server's IP
+   - Application data flows directly between client and target
    - No additional proxy-specific headers or protocols are added
 
 3. **Natural Traffic Distribution**:

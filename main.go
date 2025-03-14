@@ -71,12 +71,8 @@ func main() {
 			ConnectionPoolSize:         *connectionPoolSize,
 		}
 	} else {
-		// Override with command line parameters if explicitly provided by the user
-		// Check if flag was explicitly set by the user (not using default value)
-		modeFlag := flag.Lookup("mode")
-		if modeFlag != nil && len(flag.Args()) > 0 {
-			config.Mode = *mode
-		}
+		// Always override mode from command line flag
+		config.Mode = *mode
 
 		localFlag := flag.Lookup("local")
 		if localFlag != nil && *localAddr != "127.0.0.1:8080" {
@@ -122,39 +118,130 @@ func main() {
 		log.Println("FORCING SERVER MODE FROM FLAG")
 		config.Mode = "server"
 	}
+	
+	// Debug logging for mode
+	log.Printf("Flag mode value: %s", flag.Lookup("mode").Value.String())
+	log.Printf("Config mode value: %s", config.Mode)
 
 	// Mode handling
 	switch config.Mode {
 	case "client":
 		log.Println("STARTING IN CLIENT MODE")
 
-		// Create server manager for direct mode
-		serverSessionManager := session.NewManager()
-		go serverSessionManager.StartCleanup(60 * time.Second)
-
-		// Emit logs for tests
-		log.Printf("🔒 SNI CONCEALMENT: Initiating connection with OOB server")
-		log.Printf("🔒 Using OOB server at %s", config.RemoteProxyAddr)
-
-		// Start client
-		startClient(config, serverSessionManager)
+		// Configure the HTTP OOB client to communicate with the OOB server
+		oobServerAddr := config.RemoteProxyAddr
+		if config.RelayPort > 0 {
+			// Use relay port if specified
+			oobServerAddr = fmt.Sprintf("localhost:%d", config.RelayPort)
+		}
+		
+		log.Printf("🔒 SNI CONCEALMENT: Using OOB server at %s", oobServerAddr)
+		
+		// Create HTTP OOB client
+		oobClient := &session.HTTPOOBClient{
+			ServerAddress: oobServerAddr,
+		}
+		
+		// Initialize session manager with HTTP client
+		sessionManager := session.NewSessionManager(oobClient)
+		
+		// Initialize tunnel manager
+		tunnelManager := relay.NewTunnelManager(sessionManager)
+		
+		// Clear client logs
+		log.Printf("🔒 NETWORK MODE: Using HTTP API for OOB communication")
+		log.Printf("🔒 Using OOB server at %s", oobServerAddr)
+		
+		fmt.Println("Client mode started on", config.LocalProxyAddr)
+		
+		// Initialize client proxy with options
+		clientProxy := client.NewClientProxy(
+			sessionManager,
+			tunnelManager,
+			client.WithFakeSNI(config.CoverSNI),
+			client.WithPrioritizeSNI(config.PrioritizeSNI),
+			client.WithFullClientHelloConcealment(config.FullClientHelloConcealment),
+			client.WithHandshakeTimeout(config.HandshakeTimeout),
+		)
+		
+		// Start client proxy
+		err := clientProxy.Start(config.LocalProxyAddr)
+		if err != nil {
+			log.Fatalf("❌ Failed to start client proxy: %v", err)
+		}
 
 	case "server":
 		log.Println("STARTING IN SERVER MODE")
 		startServer(config)
 
 	case "dual":
-		// Create a session manager first for direct use
+		// First, clear the logs so we can see what we're doing
+		log.Println("----------------------------------------")
+		log.Println("STARTING IN DUAL MODE WITH NETWORK OOB")
+		log.Println("----------------------------------------")
+		
+		// Create a session manager for the server
 		serverSessionManager := session.NewManager()
-
-		// Start the client with direct access to the server session manager
-		go startClient(config, serverSessionManager)
-
-		// Start session cleanup in the background
+		
+		// Determine port for the OOB server
+		oobPort := 9008
+		if config.RelayPort > 0 {
+			oobPort = config.RelayPort
+		}
+		
+		// Configure the server address
+		oobAddr := fmt.Sprintf("localhost:%d", oobPort)
+		
+		// Start the server on the OOB port
+		log.Printf("Starting OOB server on %s", oobAddr)
+		go func() {
+			serverProxy := server.NewServerProxy(serverSessionManager)
+			if err := serverProxy.Start(oobAddr); err != nil {
+				log.Fatalf("❌ Failed to start OOB server: %v", err)
+			}
+		}()
+		
+		// Start session cleanup
 		go serverSessionManager.StartCleanup(60 * time.Second)
-
-		// Start the server with the same session manager
-		startServerWithManager(config, serverSessionManager)
+		
+		// Wait for the server to start up
+		time.Sleep(1 * time.Second)
+		
+		// Configure the client to use network OOB
+		log.Printf("Starting client using network OOB to %s", oobAddr)
+		
+		// Create HTTP OOB client
+		oobClient := &session.HTTPOOBClient{
+			ServerAddress: oobAddr,
+		}
+		
+		// Initialize session manager with HTTP client
+		sessionManager := session.NewSessionManager(oobClient)
+		
+		// Initialize tunnel manager
+		tunnelManager := relay.NewTunnelManager(sessionManager)
+		
+		// Clear client logs
+		log.Printf("🔒 NETWORK MODE: Using HTTP API for OOB communication")
+		log.Printf("🔒 Using OOB server at %s", oobAddr)
+		
+		fmt.Println("Client mode started on", config.LocalProxyAddr)
+		
+		// Initialize client proxy with options
+		clientProxy := client.NewClientProxy(
+			sessionManager,
+			tunnelManager,
+			client.WithFakeSNI(config.CoverSNI),
+			client.WithPrioritizeSNI(config.PrioritizeSNI),
+			client.WithFullClientHelloConcealment(config.FullClientHelloConcealment),
+			client.WithHandshakeTimeout(config.HandshakeTimeout),
+		)
+		
+		// Start client proxy
+		err := clientProxy.Start(config.LocalProxyAddr)
+		if err != nil {
+			log.Fatalf("❌ Failed to start client proxy: %v", err)
+		}
 
 	default:
 		fmt.Println("Invalid mode:", config.Mode)
@@ -197,6 +284,45 @@ func startClient(config *Config, serverManager *session.Manager) {
 	}
 }
 
+func startClientWithHTTP(config *Config) {
+	// Configure server address to always use the relay port
+	// This ensures we're using HTTP API even in dual mode
+	serverAddr := fmt.Sprintf("localhost:%d", config.RelayPort)
+
+	// Create an HTTP OOB client that connects to the server
+	oobClient := &session.HTTPOOBClient{
+		ServerAddress: serverAddr,
+	}
+
+	// Print clear log indicating we're using HTTP API
+	log.Printf("🔒 NETWORK MODE: Using HTTP API for OOB communication")
+	log.Printf("🔒 Using OOB server at %s", serverAddr)
+
+	// Initialize session manager
+	sessionManager := session.NewSessionManager(oobClient)
+
+	// Initialize tunnel manager
+	tunnelManager := relay.NewTunnelManager(sessionManager)
+
+	fmt.Println("Client mode started on", config.LocalProxyAddr)
+
+	// Initialize client proxy with options
+	clientProxy := client.NewClientProxy(
+		sessionManager,
+		tunnelManager,
+		client.WithFakeSNI(config.CoverSNI),
+		client.WithPrioritizeSNI(config.PrioritizeSNI),
+		client.WithFullClientHelloConcealment(config.FullClientHelloConcealment),
+		client.WithHandshakeTimeout(config.HandshakeTimeout),
+	)
+
+	// Start client proxy
+	err := clientProxy.Start(config.LocalProxyAddr)
+	if err != nil {
+		log.Fatalf("❌ Failed to start client proxy: %v", err)
+	}
+}
+
 func startServer(config *Config) {
 	log.Println("SERVER FUNCTION CALLED")
 
@@ -211,13 +337,16 @@ func startServer(config *Config) {
 }
 
 func startServerWithManager(config *Config, sessionManager *session.Manager) {
-	fmt.Printf("Server mode started on %s\n", config.LocalProxyAddr)
+	// Calculate server address for the OOB server
+	serverAddr := fmt.Sprintf("localhost:%d", config.RelayPort)
+	
+	fmt.Printf("Server mode started on %s\n", serverAddr)
 
 	// Initialize server proxy
 	serverProxy := server.NewServerProxy(sessionManager)
 
-	// Start server proxy
-	err := serverProxy.Start(config.LocalProxyAddr)
+	// Start server proxy on the relay port
+	err := serverProxy.Start(serverAddr)
 	if err != nil {
 		log.Fatalf("❌ Failed to start server proxy: %v", err)
 	}

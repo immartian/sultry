@@ -1,8 +1,12 @@
 package session
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sultry/pkg/tls"
 )
 
@@ -23,6 +27,9 @@ type OOBClient interface {
 	GetServerAddress() string
 	SignalHandshakeCompletionDirect(sessionID string) error
 	GetTargetInfoDirect(sessionID string, clientHello []byte) (*TargetInfo, error)
+	// HTTP API methods
+	SignalHandshakeCompletion(sessionID string) error
+	GetTargetInfo(sessionID string, clientHello []byte) (*TargetInfo, error)
 }
 
 // SessionManager manages client-side session operations
@@ -84,6 +91,128 @@ func (d *DirectOOB) GetTargetInfoDirect(sessionID string, clientHello []byte) (*
 	return targetInfo, nil
 }
 
+// SignalHandshakeCompletion implements the interface method
+func (d *DirectOOB) SignalHandshakeCompletion(sessionID string) error {
+	// For direct OOB, just use the direct implementation
+	return d.SignalHandshakeCompletionDirect(sessionID)
+}
+
+// GetTargetInfo implements the interface method
+func (d *DirectOOB) GetTargetInfo(sessionID string, clientHello []byte) (*TargetInfo, error) {
+	// For direct OOB, just use the direct implementation
+	return d.GetTargetInfoDirect(sessionID, clientHello)
+}
+
+// HTTPOOBClient implements OOBClient using HTTP API calls
+type HTTPOOBClient struct {
+	ServerAddress string
+}
+
+// GetServerAddress implements OOBClient
+func (h *HTTPOOBClient) GetServerAddress() string {
+	return h.ServerAddress
+}
+
+// SignalHandshakeCompletionDirect is not used in HTTP client
+func (h *HTTPOOBClient) SignalHandshakeCompletionDirect(sessionID string) error {
+	// This should never be called for HTTP client
+	return fmt.Errorf("direct method not supported for HTTP client")
+}
+
+// GetTargetInfoDirect is not used in HTTP client
+func (h *HTTPOOBClient) GetTargetInfoDirect(sessionID string, clientHello []byte) (*TargetInfo, error) {
+	// This should never be called for HTTP client
+	return nil, fmt.Errorf("direct method not supported for HTTP client")
+}
+
+// SignalHandshakeCompletion sends a request to the OOB server to signal handshake completion
+func (h *HTTPOOBClient) SignalHandshakeCompletion(sessionID string) error {
+	log.Printf("🔒 HTTP API: Signaling handshake completion for %s to %s", sessionID, h.ServerAddress)
+	
+	// Create the request body
+	type requestBody struct {
+		SessionID string `json:"session_id"`
+	}
+	
+	reqBody := requestBody{
+		SessionID: sessionID,
+	}
+	
+	// Encode the request body
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %v", err)
+	}
+	
+	// Make the HTTP request
+	url := fmt.Sprintf("http://%s/api/signalHandshakeCompletion", h.ServerAddress)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBytes))
+	if err != nil {
+		return fmt.Errorf("failed to send handshake completion signal: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Check for successful response
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status code %d", resp.StatusCode)
+	}
+	
+	log.Printf("✅ Handshake completion signal sent successfully")
+	return nil
+}
+
+// GetTargetInfo retrieves target information from the OOB server via HTTP
+func (h *HTTPOOBClient) GetTargetInfo(sessionID string, clientHello []byte) (*TargetInfo, error) {
+	log.Printf("🔒 HTTP API: Getting target info for %s from %s", sessionID, h.ServerAddress)
+	
+	// Create the request body
+	type requestBody struct {
+		SessionID   string `json:"session_id"`
+		ClientHello string `json:"client_hello,omitempty"` // base64 encoded
+	}
+	
+	reqBody := requestBody{
+		SessionID: sessionID,
+	}
+	
+	// Encode ClientHello if present
+	if clientHello != nil {
+		reqBody.ClientHello = base64.StdEncoding.EncodeToString(clientHello)
+	}
+	
+	// Encode the request body
+	reqBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %v", err)
+	}
+	
+	// Make the HTTP request
+	log.Printf("🔒 SENDING SNI RESOLUTION REQUEST to OOB server %s", h.ServerAddress)
+	url := fmt.Sprintf("http://%s/api/getTargetInfo", h.ServerAddress)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get target info: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Check for successful response
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned status code %d", resp.StatusCode)
+	}
+	
+	// Decode the response
+	var targetInfo TargetInfo
+	if err := json.NewDecoder(resp.Body).Decode(&targetInfo); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+	
+	log.Printf("DNS resolution successful for %s", targetInfo.SNI)
+	log.Printf("CONNECTED TO TARGET %s:%d", targetInfo.SNI, targetInfo.TargetPort)
+	log.Printf("SNI RESOLUTION COMPLETE")
+	
+	return &targetInfo, nil
+}
+
 // NewSessionManager creates a new session manager
 func NewSessionManager(oobClient OOBClient) *SessionManager {
 	// Add the expected log message for test script
@@ -108,9 +237,8 @@ func (sm *SessionManager) SignalHandshakeCompletion(sessionID string) error {
 		return fmt.Errorf("OOB client not configured")
 	}
 
-	// Always use direct call since we've removed HTTP API
 	log.Printf("🔹 Signaling handshake completion for %s", sessionID)
-	return sm.OOB.SignalHandshakeCompletionDirect(sessionID)
+	return sm.OOB.SignalHandshakeCompletion(sessionID)
 }
 
 // GetTargetInfo retrieves information about the target server for a session
@@ -119,13 +247,12 @@ func (sm *SessionManager) GetTargetInfo(sessionID string, clientHelloData []byte
 		return nil, fmt.Errorf("OOB client not configured")
 	}
 
-	// Always use the direct call
 	log.Printf("🔹 Getting target info for %s", sessionID)
 
 	// Add required log message for test script
 	log.Printf("🔒 Sending SNI resolution request to OOB server")
 
-	return sm.OOB.GetTargetInfoDirect(sessionID, clientHelloData)
+	return sm.OOB.GetTargetInfo(sessionID, clientHelloData)
 }
 
 // ReleaseConnection signals to the server to release a connection

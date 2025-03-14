@@ -5,10 +5,11 @@
 We've successfully restructured the Sultry codebase from a monolithic design to a modular architecture, with the following key improvements:
 
 1. **Architectural Improvements:**
-   - ✅ Replaced HTTP API with direct function calls for OOB communication
+   - ✅ Implemented proper HTTP API for OOB communication
    - ✅ Created modular package structure with focused components
    - ✅ Simplified code architecture and eliminated redundant logic
    - ✅ Implemented more efficient communication between components
+   - ✅ Ensured proper network separation between client and server components
 
 2. **Feature Implementation Status:**
    - ✅ SNI concealment via OOB channel is functional
@@ -129,11 +130,12 @@ We've significantly improved the `handleFullClientHelloConcealment()` function i
    - Eliminated circular dependencies
    - Created focused modules with single responsibilities
 
-2. ✅ **DirectOOB Implementation**:
-   - Replaced HTTP API with direct function calls for local deployment
-   - Added explicit logging to clearly identify DirectOOB mode
-   - Maintained compatibility with distributed mode if needed
-   - Eliminated unnecessary network overhead for local components
+2. ✅ **HTTP-Based OOB Implementation**:
+   - Implemented proper HTTP API for OOB communication
+   - Client and server components communicate over separate network connections
+   - Full ClientHello concealment is achieved via network OOB
+   - Clean separation between components with proper interface abstractions
+   - Added comprehensive logging to track data flow between components
 
 3. ✅ **TLS Protocol Handling Improvements**:
    - Enhanced TLS record boundary handling for protocol compliance
