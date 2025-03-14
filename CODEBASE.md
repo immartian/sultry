@@ -100,6 +100,7 @@ The following optimizations have been implemented:
 3. ✅ **Modularize connection strategies** in pkg/connection
 4. ✅ **Implement proper TLS utilities module** in pkg/tls
 5. ✅ **Create smaller, focused implementations** of client and server components
+6. ✅ **Eliminate HTTP API overhead** with direct OOB communication option
 
 ## Implementation Practices
 

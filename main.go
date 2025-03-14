@@ -36,6 +36,7 @@ import (
 	"sultry/pkg/server"
 	"sultry/pkg/session"
 	"syscall"
+	"time"
 )
 
 // OOBModule handles out-of-band communication
@@ -46,6 +47,20 @@ type OOBModule struct {
 // GetServerAddress returns the OOB server address
 func (o *OOBModule) GetServerAddress() string {
 	return o.ServerAddress
+}
+
+// SignalHandshakeCompletionDirect implements OOBClient interface
+func (o *OOBModule) SignalHandshakeCompletionDirect(sessionID string) error {
+	// This is a remote module, so this method shouldn't be called directly
+	log.Printf("⚠️ Warning: Called direct method on remote OOB module")
+	return fmt.Errorf("direct methods not available on remote OOB modules")
+}
+
+// GetTargetInfoDirect implements OOBClient interface
+func (o *OOBModule) GetTargetInfoDirect(sessionID string, clientHello []byte) (*session.TargetInfo, error) {
+	// This is a remote module, so this method shouldn't be called directly
+	log.Printf("⚠️ Warning: Called direct method on remote OOB module")
+	return nil, fmt.Errorf("direct methods not available on remote OOB modules")
 }
 
 func main() {
@@ -60,6 +75,7 @@ func main() {
 	handshakeTimeout := flag.Int("handshake-timeout", 10000, "Handshake timeout in milliseconds")
 	connectionPoolSize := flag.Int("connection-pool", 100, "Connection pool size")
 	configPath := flag.String("config", "config.json", "Path to configuration file")
+	directOOB := flag.Bool("direct-oob", false, "Use direct OOB communication (no HTTP API)")
 	
 	flag.Parse()
 
@@ -80,6 +96,7 @@ func main() {
 			FullClientHelloConcealment: *fullClientHello,
 			HandshakeTimeout:          *handshakeTimeout,
 			ConnectionPoolSize:        *connectionPoolSize,
+			DirectOOB:                 *directOOB,
 		}
 	} else {
 		// Override with command line parameters if explicitly provided by the user
@@ -129,29 +146,67 @@ func main() {
 	// Set up signal handling for graceful shutdown
 	setupSignalHandling()
 
-	// Start in the appropriate mode
+	// Special case for direct OOB in non-dual mode
+	if config.DirectOOB && config.Mode != "dual" {
+		if config.Mode == "client" {
+			// Create a local server session manager
+			serverSessionManager := session.NewManager()
+			
+			// Start session cleanup in the background
+			go serverSessionManager.StartCleanup(60 * time.Second)
+			
+			// Start client with direct access
+			startClient(config, serverSessionManager)
+		} else {
+			log.Println("⚠️ Warning: direct-oob flag has no effect in server-only mode")
+			startServer(config)
+		}
+		return
+	}
+	
+	// Regular mode handling
 	switch config.Mode {
 	case "client":
-		startClient(config)
+		startClient(config, nil)
 	case "server":
 		startServer(config)
 	case "dual":
-		go startClient(config)
-		startServer(config)
+		// Create a session manager first for direct use
+		serverSessionManager := session.NewManager()
+		
+		// Start the client with direct access to the server session manager
+		go startClient(config, serverSessionManager)
+		
+		// Start session cleanup in the background
+		go serverSessionManager.StartCleanup(60 * time.Second)
+		
+		// Start the server with the same session manager
+		startServerWithManager(config, serverSessionManager)
 	default:
 		fmt.Println("Invalid mode:", config.Mode)
 		os.Exit(1)
 	}
 }
 
-func startClient(config *Config) {
-	// Initialize OOB module
-	oobModule := &OOBModule{
-		ServerAddress: config.RemoteProxyAddr,
+func startClient(config *Config, serverManager *session.Manager) {
+	var oobClient session.OOBClient
+	
+	// If we have a server manager, use direct OOB
+	if serverManager != nil {
+		log.Println("🔹 Using direct OOB implementation for local communication")
+		oobClient = &session.DirectOOB{
+			Manager: serverManager,
+		}
+	} else {
+		// Use HTTP OOB for remote communication
+		log.Println("🔹 Using HTTP OOB implementation for remote communication")
+		oobClient = &OOBModule{
+			ServerAddress: config.RemoteProxyAddr,
+		}
 	}
 	
 	// Initialize session manager
-	sessionManager := session.NewSessionManager(oobModule)
+	sessionManager := session.NewSessionManager(oobClient)
 	
 	// Initialize tunnel manager
 	tunnelManager := relay.NewTunnelManager(sessionManager)
@@ -180,8 +235,13 @@ func startServer(config *Config) {
 	sessionManager := session.NewManager()
 	
 	// Start session cleanup
-	go sessionManager.StartCleanup(60 * 1e9) // 60 seconds
+	go sessionManager.StartCleanup(60 * time.Second)
 	
+	// Start server with the new manager
+	startServerWithManager(config, sessionManager)
+}
+
+func startServerWithManager(config *Config, sessionManager *session.Manager) {
 	fmt.Println("Server mode started on", config.LocalProxyAddr)
 	
 	// Initialize server proxy

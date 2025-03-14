@@ -186,7 +186,20 @@ make build
 
 # Dual mode - runs both client and server components on the same machine
 ./bin/sultry -mode dual -local 127.0.0.1:8080
+
+# Client mode with direct OOB (no HTTP API overhead)
+./bin/sultry -mode client -direct-oob -local 127.0.0.1:8080
 ```
+
+### Optimized Local Mode
+
+For local operations, you can use the `-direct-oob` flag to bypass the HTTP API layer:
+
+```bash
+./bin/sultry -mode client -direct-oob -local 127.0.0.1:8080
+```
+
+This mode creates a direct connection between components, eliminating the HTTP API overhead. It's significantly more efficient for local operations.
 
 For typical deployments, you would run the server component on a machine outside the censored network and the client component on the local machine.
 
