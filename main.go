@@ -214,7 +214,7 @@ func main() {
 		}
 		
 		// Configure the server address
-		oobAddr := fmt.Sprintf("localhost:%d", oobPort)
+		oobAddr := fmt.Sprintf("0.0.0.0:%d", oobPort)
 		
 		// Start the server on the OOB port
 		log.Printf("Starting OOB server on %s", oobAddr)
@@ -361,8 +361,8 @@ func startServer(config *Config) {
 }
 
 func startServerWithManager(config *Config, sessionManager *session.Manager) {
-	// Calculate server address for the OOB server
-	serverAddr := fmt.Sprintf("localhost:%d", config.RelayPort)
+	// Calculate server address for the OOB server, using 0.0.0.0 to listen on all interfaces
+	serverAddr := fmt.Sprintf("0.0.0.0:%d", config.RelayPort)
 	
 	fmt.Printf("Server mode started on %s\n", serverAddr)
 
