@@ -275,7 +275,7 @@ func (h *ConnectionHandler) handleFullClientHelloConcealment(clientConn net.Conn
 	}
 	
 	// 5. Set up bidirectional relay with session ticket detection
-	log.Printf("✅ Setting up bidirectional relay with direct connection for %s", sessionID)
+	log.Printf("Starting bidirectional relay with direct connection for %s", sessionID)
 	relay.BiRelayDataWithTicketDetection(clientConn, directConn, "client → target", "target → client", 
 		func(data []byte) {
 			if tls.IsSessionTicketMessage(data) {

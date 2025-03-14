@@ -62,7 +62,7 @@ func (tm *TunnelManager) EstablishDirectConnectionAfterHandshake(sessionID strin
 		log.Printf("🔹 TCP connection optimized")
 	}
 
-	log.Printf("✅ Established direct connection to %s for session %s", targetAddr, sessionID)
+	log.Printf("✅ Established direct connection to %s", targetAddr)
 
 	return conn, nil
 }

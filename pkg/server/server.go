@@ -161,7 +161,7 @@ func (sp *ServerProxy) handleCompleteHandshake(w http.ResponseWriter, r *http.Re
 
 	// Mark handshake as complete
 	sp.SessionManager.MarkHandshakeComplete(req.SessionID)
-	log.Printf("✅ Handshake completed for session %s", req.SessionID)
+	log.Printf("✅ Handshake complete for session %s", req.SessionID)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -290,7 +290,7 @@ func (sp *ServerProxy) handleTargetCommunication(sessionID string, clientConn ne
 					
 					// Check for handshake completion
 					if tls.IsHandshakeComplete(data) {
-						log.Printf("✅ Session %s: Handshake complete", sessionID)
+						log.Printf("✅ Handshake complete for session %s", sessionID)
 						sp.SessionManager.MarkHandshakeComplete(sessionID)
 					}
 					
