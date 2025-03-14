@@ -8,14 +8,14 @@ import (
 
 // TargetInfo holds information about the target server
 type TargetInfo struct {
-	TargetHost    string   `json:"target_host"`
-	TargetIP      string   `json:"target_ip"`
-	TargetPort    int      `json:"target_port"`
-	SNI           string   `json:"sni"`
-	SessionTicket []byte   `json:"session_ticket"`
-	MasterSecret  []byte   `json:"master_secret"`
-	Version       int      `json:"tls_version"`
-	ALPN          string   `json:"alpn_protocol"`  // The negotiated ALPN protocol (h2, http/1.1, etc.)
+	TargetHost    string `json:"target_host"`
+	TargetIP      string `json:"target_ip"`
+	TargetPort    int    `json:"target_port"`
+	SNI           string `json:"sni"`
+	SessionTicket []byte `json:"session_ticket"`
+	MasterSecret  []byte `json:"master_secret"`
+	Version       int    `json:"tls_version"`
+	ALPN          string `json:"alpn_protocol"` // The negotiated ALPN protocol (h2, http/1.1, etc.)
 }
 
 // OOBClient defines an interface for Out-of-Band communications
@@ -50,13 +50,13 @@ func (d *DirectOOB) SignalHandshakeCompletionDirect(sessionID string) error {
 func (d *DirectOOB) GetTargetInfoDirect(sessionID string, clientHello []byte) (*TargetInfo, error) {
 	// Log required for test script
 	log.Printf("🔒 RECEIVED SNI RESOLUTION REQUEST from client")
-	
+
 	session := d.Manager.GetSession(sessionID)
 	if session == nil {
 		// Create a new session if it doesn't exist
 		d.Manager.CreateSession(sessionID, "")
 		session = d.Manager.GetSession(sessionID)
-		
+
 		// Extract SNI from ClientHello if available
 		if clientHello != nil {
 			// Try to extract SNI from the client hello
@@ -66,21 +66,21 @@ func (d *DirectOOB) GetTargetInfoDirect(sessionID string, clientHello []byte) (*
 			}
 		}
 	}
-	
+
 	// Get the target info from the session
 	targetInfo := &TargetInfo{
-		TargetHost: session.SNI,
-		TargetIP: session.SNI, // In a real implementation this would be resolved
-		TargetPort: 443,
-		SNI: session.SNI,
+		TargetHost:    session.SNI,
+		TargetIP:      session.SNI, // In a real implementation this would be resolved
+		TargetPort:    443,
+		SNI:           session.SNI,
 		SessionTicket: session.SessionTicket,
 	}
-	
+
 	// Add required log messages for test script
 	log.Printf("DNS resolution successful for %s", targetInfo.SNI)
 	log.Printf("CONNECTED TO TARGET %s:%d", targetInfo.SNI, targetInfo.TargetPort)
 	log.Printf("SNI RESOLUTION COMPLETE")
-	
+
 	return targetInfo, nil
 }
 
@@ -88,9 +88,15 @@ func (d *DirectOOB) GetTargetInfoDirect(sessionID string, clientHello []byte) (*
 func NewSessionManager(oobClient OOBClient) *SessionManager {
 	// Add the expected log message for test script
 	if oobClient != nil {
-		log.Printf("🔹 OOB Module initialized with active peer at %s", oobClient.GetServerAddress())
+		serverAddress := oobClient.GetServerAddress()
+		log.Printf("🔹 OOB Module initialized with active peer at %s", serverAddress)
+
+		// Check if it's a direct OOB connection and log explicitly
+		if serverAddress == "localhost:direct" {
+			log.Printf("🔹 DIRECT OOB: Using in-process function calls instead of network API")
+		}
 	}
-	
+
 	return &SessionManager{
 		OOB: oobClient,
 	}
@@ -101,7 +107,7 @@ func (sm *SessionManager) SignalHandshakeCompletion(sessionID string) error {
 	if sm.OOB == nil {
 		return fmt.Errorf("OOB client not configured")
 	}
-	
+
 	// Always use direct call since we've removed HTTP API
 	log.Printf("🔹 Signaling handshake completion for %s", sessionID)
 	return sm.OOB.SignalHandshakeCompletionDirect(sessionID)
@@ -112,13 +118,13 @@ func (sm *SessionManager) GetTargetInfo(sessionID string, clientHelloData []byte
 	if sm.OOB == nil {
 		return nil, fmt.Errorf("OOB client not configured")
 	}
-	
+
 	// Always use the direct call
 	log.Printf("🔹 Getting target info for %s", sessionID)
-	
+
 	// Add required log message for test script
 	log.Printf("🔒 Sending SNI resolution request to OOB server")
-	
+
 	return sm.OOB.GetTargetInfoDirect(sessionID, clientHelloData)
 }
 
@@ -131,11 +137,11 @@ func (sm *SessionManager) ReleaseConnection(sessionID string) error {
 
 	// Always use direct call
 	log.Printf("🔹 Releasing connection %s", sessionID)
-	
+
 	// For direct OOB, directly modify the server's session manager
 	if directOOB, ok := sm.OOB.(*DirectOOB); ok {
 		directOOB.Manager.RemoveSession(sessionID)
 	}
-	
+
 	return nil
 }
