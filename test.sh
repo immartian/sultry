@@ -12,7 +12,7 @@ export PATH=$PATH:/usr/local/go/bin
 # Build Sultry first
 echo "=== Building Sultry ==="
 cd "$(dirname "$0")"
-go build -v .
+make build
 BUILD_STATUS=$?
 if [ $BUILD_STATUS -ne 0 ]; then
     echo "❌ Build failed with exit code $BUILD_STATUS"
@@ -47,7 +47,7 @@ fi
 # Start server with explicit logging
 echo "=== Starting server component ==="
 cd "$(dirname "$0")"
-./sultry --mode server > test_server.log 2>&1 &
+./bin/sultry -mode server -local 127.0.0.1:9008 > test_server.log 2>&1 &
 SERVER_PID=$!
 echo "Server started with PID: $SERVER_PID"
 
@@ -62,17 +62,24 @@ if ! ps -p $SERVER_PID > /dev/null; then
     exit 1
 fi
 
-# Verify server is listening on 9008
+# Verify server is listening on 9008 for TCP and 9009 for HTTP
 if ! nc -z 127.0.0.1 9008 2>/dev/null; then
-    echo "ERROR: Server not listening on port 9008!"
+    echo "ERROR: Server not listening on port 9008 (TCP)!"
     exit 1
 else
-    echo "✅ Server confirmed listening on port 9008"
+    echo "✅ Server confirmed listening on port 9008 (TCP)"
+fi
+
+# Try to connect to the HTTP API on 9009
+if ! timeout 1 curl -s http://127.0.0.1:9009/ > /dev/null 2>&1; then
+    echo "⚠️ HTTP API not detected on port 9009 - this may be expected with direct OOB"
+else
+    echo "✅ HTTP API confirmed on port 9009"
 fi
 
 # Start client with explicit logging
 echo "=== Starting client component ==="
-./sultry --mode client > test_client.log 2>&1 &
+./bin/sultry -mode client -direct-oob -local 127.0.0.1:7008 -remote 127.0.0.1:9008 > test_client.log 2>&1 &
 CLIENT_PID=$!
 echo "Client started with PID: $CLIENT_PID"
 
