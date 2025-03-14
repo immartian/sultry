@@ -166,11 +166,22 @@ func main() {
 		return
 	}
 	
+	// Log the final config
+	log.Printf("USING MODE: %s", config.Mode)
+	
+	// Manual override for debug purposes
+	if flag.Lookup("mode").Value.String() == "server" {
+		log.Println("FORCING SERVER MODE FROM FLAG")
+		config.Mode = "server"
+	}
+	
 	// Regular mode handling
 	switch config.Mode {
 	case "client":
+		log.Println("STARTING IN CLIENT MODE")
 		startClient(config, nil)
 	case "server":
+		log.Println("STARTING IN SERVER MODE")
 		startServer(config)
 	case "dual":
 		// Create a session manager first for direct use
@@ -253,6 +264,8 @@ func startClient(config *Config, serverManager *session.Manager) {
 }
 
 func startServer(config *Config) {
+	log.Println("SERVER FUNCTION CALLED")
+	
 	// Initialize session manager
 	sessionManager := session.NewManager()
 	
@@ -264,7 +277,7 @@ func startServer(config *Config) {
 }
 
 func startServerWithManager(config *Config, sessionManager *session.Manager) {
-	fmt.Println("Server mode started on", config.LocalProxyAddr)
+	fmt.Printf("Server mode started on %s (API on port+1)\n", config.LocalProxyAddr)
 	
 	// Initialize server proxy
 	serverProxy := server.NewServerProxy(sessionManager)

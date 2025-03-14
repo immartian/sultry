@@ -19,6 +19,11 @@ type ServerProxy struct {
 	API            *http.ServeMux
 }
 
+// IsClient returns false because this is the server component
+func (sp *ServerProxy) IsClient() bool {
+	return false
+}
+
 // NewServerProxy creates a new server proxy
 func NewServerProxy(sessionManager *session.Manager) *ServerProxy {
 	sp := &ServerProxy{

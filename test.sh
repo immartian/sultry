@@ -47,7 +47,7 @@ fi
 # Start server with explicit logging
 echo "=== Starting server component ==="
 cd "$(dirname "$0")"
-./bin/sultry -mode server -local 127.0.0.1:9008 > test_server.log 2>&1 &
+./bin/sultry -mode=server -local 127.0.0.1:9008 > test_server.log 2>&1 &
 SERVER_PID=$!
 echo "Server started with PID: $SERVER_PID"
 
@@ -79,7 +79,7 @@ fi
 
 # Start client with explicit logging
 echo "=== Starting client component ==="
-./bin/sultry -mode client -direct-oob -local 127.0.0.1:7008 -remote 127.0.0.1:9008 > test_client.log 2>&1 &
+./bin/sultry -mode=dual -local 127.0.0.1:7008 > test_client.log 2>&1 &
 CLIENT_PID=$!
 echo "Client started with PID: $CLIENT_PID"
 
