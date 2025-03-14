@@ -20,22 +20,17 @@ Sultry employs a dual-component architecture:
 
 ## Codebase Organization
 
-The codebase is organized in a modular structure:
+The codebase is organized in a clean modular structure:
 
 ```
 sultry/
-├── cmd/
-│   └── minimal/    # Minimal implementation using modular packages
 ├── pkg/
 │   ├── client/     # Client-side proxy functionality
 │   ├── connection/ # Connection handling
-│   ├── handlers/   # HTTP API handlers
 │   ├── relay/      # Data relay functionality
 │   ├── server/     # Server-side proxy functionality
 │   ├── session/    # Session management
 │   └── tls/        # TLS protocol utilities
-├── client.go       # Original client implementation
-├── server.go       # Original server implementation
 └── main.go         # Entry point
 ```
 
@@ -176,19 +171,11 @@ This architecture makes Sultry significantly harder to detect and block compared
 The easiest way to get started is to use the included Makefile:
 
 ```bash
-# Build both the original and modular versions
+# Build Sultry
 make build
-
-# Build just the original version
-make build-original
-
-# Build just the modular version
-make build-modular
 ```
 
 ### Running Modes
-
-#### Original Version
 
 ```bash
 # Client mode - handles client connections and OOB SNI resolution
@@ -199,19 +186,6 @@ make build-modular
 
 # Dual mode - runs both client and server components on the same machine
 ./bin/sultry -mode dual -local 127.0.0.1:8080
-```
-
-#### Modular Version
-
-```bash
-# Client mode
-./bin/sultry-mod -mode client -local 127.0.0.1:8080 -remote your-server.com:9090
-
-# Server mode
-./bin/sultry-mod -mode server -local 0.0.0.0:9090
-
-# Dual mode
-./bin/sultry-mod -mode dual -local 127.0.0.1:8080
 ```
 
 For typical deployments, you would run the server component on a machine outside the censored network and the client component on the local machine.
@@ -230,7 +204,11 @@ curl -x http://127.0.0.1:7008 https://example.com/
 
 ### Runtime Guide
 
-For detailed runtime instructions, see [RUNTIME.md](RUNTIME.md).
+Run Sultry with the -h flag to see all available runtime options:
+
+```bash
+./bin/sultry -h
+```
 
 ## Configuration
 
@@ -278,19 +256,10 @@ For detailed runtime instructions, see [RUNTIME.md](RUNTIME.md).
 
 ### Code Structure
 
-The project is currently organized with a few large files:
+The project is organized with a clean, modular structure:
 
-- `client.go`: Client-side proxy implementation (2318 lines)
-- `server.go`: Server-side proxy implementation (1761 lines)
 - `config.go`: Configuration handling
-- `utils.go`: TLS utility functions
-- `oob.go`: Out-of-Band communication module
 - `main.go`: Entry point
-
-#### Modular Structure (Implemented)
-
-A modular code structure has been implemented to improve maintainability. The large monolithic files have been broken down into focused packages:
-
 - `pkg/tls/tls.go`: TLS protocol utilities and constants for parsing records, extracting SNI, etc.
 - `pkg/relay/relay.go`: Functions for relaying data between connections with TLS awareness
 - `pkg/relay/tunnel.go`: Functions for establishing direct connections after handshake

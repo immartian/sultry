@@ -2,18 +2,12 @@
 
 ## Project Structure
 
-Sultry is a specialized TLS proxy designed for SNI concealment and censorship circumvention. The codebase has been refactored into a modular structure:
+Sultry is a specialized TLS proxy designed for SNI concealment and censorship circumvention. The codebase is organized in a clean, modular structure:
 
 ```
 sultry/
-├── client.go       # Original client-side proxy implementation
-├── server.go       # Original server-side proxy implementation
 ├── config.go       # Configuration handling
-├── utils.go        # Original TLS utility functions
-├── oob.go          # Out-of-Band (OOB) communication module
-├── main.go         # Updated entry point supporting modular architecture
-├── cmd/
-│   └── minimal/    # Minimal implementation using modular packages
+├── main.go         # Entry point
 ├── pkg/
 │   ├── client/     # Client-side proxy functionality
 │   ├── connection/ # Connection handling
@@ -25,16 +19,6 @@ sultry/
 ```
 
 ## Core Components
-
-### Original Monolithic Components
-
-The original implementation consists of large files:
-
-1. **client.go** (2131 lines): Client-side proxy implementation
-2. **server.go** (1761 lines): Server-side proxy implementation
-3. **oob.go**: Out-of-Band communication module
-4. **config.go**: Configuration handling
-5. **utils.go**: TLS utility functions
 
 ### Modular Implementation
 

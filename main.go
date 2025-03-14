@@ -82,32 +82,46 @@ func main() {
 			ConnectionPoolSize:        *connectionPoolSize,
 		}
 	} else {
-		// Override with command line parameters if specified
-		if flag.Lookup("mode").Changed {
+		// Override with command line parameters if explicitly provided by the user
+		// Check if flag was explicitly set by the user (not using default value)
+		modeFlag := flag.Lookup("mode")
+		if modeFlag != nil && len(flag.Args()) > 0 {
 			config.Mode = *mode
 		}
-		if flag.Lookup("local").Changed {
+		
+		localFlag := flag.Lookup("local")
+		if localFlag != nil && *localAddr != "127.0.0.1:8080" {
 			config.LocalProxyAddr = *localAddr
 		}
-		if flag.Lookup("remote").Changed {
+		
+		remoteFlag := flag.Lookup("remote")
+		if remoteFlag != nil && *remoteAddr != "localhost:9090" {
 			config.RemoteProxyAddr = *remoteAddr
 		}
-		if flag.Lookup("cover-sni").Changed {
+		
+		coverSNIFlag := flag.Lookup("cover-sni")
+		if coverSNIFlag != nil && *coverSNI != "" {
 			config.CoverSNI = *coverSNI
 		}
-		if flag.Lookup("prioritize-sni").Changed {
+		
+		// For boolean flags, we can check based on non-default values
+		if *prioritizeSNI != false {
 			config.PrioritizeSNI = *prioritizeSNI
 		}
-		if flag.Lookup("oob-channels").Changed {
+		
+		if *oobChannels != 2 {
 			config.OOBChannels = *oobChannels
 		}
-		if flag.Lookup("full-clienthello").Changed {
+		
+		if *fullClientHello != true {
 			config.FullClientHelloConcealment = *fullClientHello
 		}
-		if flag.Lookup("handshake-timeout").Changed {
+		
+		if *handshakeTimeout != 10000 {
 			config.HandshakeTimeout = *handshakeTimeout
 		}
-		if flag.Lookup("connection-pool").Changed {
+		
+		if *connectionPoolSize != 100 {
 			config.ConnectionPoolSize = *connectionPoolSize
 		}
 	}
