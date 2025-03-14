@@ -26,7 +26,6 @@ type Config struct {
 	ConnectionPoolSize        int                `json:"connection_pool_size,omitempty"`
 	EnforceTLS13              bool               `json:"enforce_tls13,omitempty"`
 	UseOOBForApplicationData  bool               `json:"use_oob_for_application_data,omitempty"`
-	DirectOOB                 bool               `json:"direct_oob,omitempty"`
 }
 
 // GetOOBChannelsCount returns the number of OOB channels

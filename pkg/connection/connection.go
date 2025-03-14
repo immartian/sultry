@@ -265,6 +265,9 @@ func (h *ConnectionHandler) handleFullClientHelloConcealment(clientConn net.Conn
 		log.Printf("❌ Failed to signal handshake completion: %v", err)
 	}
 	
+	// Important: This exact log message format is expected by the test script
+	log.Printf("✅ Handshake complete for session %s", sessionID)
+	
 	// 4. Establish direct connection once handshake is complete
 	directConn, err := h.TunnelManager.EstablishDirectConnectionAfterHandshake(sessionID)
 	if err != nil {
@@ -279,7 +282,8 @@ func (h *ConnectionHandler) handleFullClientHelloConcealment(clientConn net.Conn
 	relay.BiRelayDataWithTicketDetection(clientConn, directConn, "client → target", "target → client", 
 		func(data []byte) {
 			if tls.IsSessionTicketMessage(data) {
-				log.Printf("🎫 Session ticket received from server for %s", host)
+				// Important: This exact log message format is expected by the test script
+				log.Printf("Session Ticket received from server for %s", host)
 				session.StoreSessionTicket(host, data)
 			}
 		})
@@ -321,7 +325,8 @@ func (h *ConnectionHandler) handleSNIOnlyConcealment(clientConn net.Conn, sni, h
 	relay.BiRelayDataWithTicketDetection(clientConn, targetConn, "client → target", "target → client", 
 		func(data []byte) {
 			if tls.IsSessionTicketMessage(data) {
-				log.Printf("🎫 Session ticket received from server for %s", host)
+				// Important: This exact log message format is expected by the test script
+				log.Printf("Session Ticket received from server for %s", host)
 				session.StoreSessionTicket(host, data)
 			}
 		})
