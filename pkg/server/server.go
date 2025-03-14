@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"sultry/pkg/session"
 	"sultry/pkg/tls"
 	"time"
@@ -42,11 +43,26 @@ func (sp *ServerProxy) registerEndpoints() {
 
 // Start runs the server proxy
 func (sp *ServerProxy) Start(localAddr string) error {
+	// Calculate API address based on the local address
+	host, port, err := net.SplitHostPort(localAddr)
+	if err != nil {
+		return fmt.Errorf("invalid address format %s: %w", localAddr, err)
+	}
+	
+	// Use the port + 1 for the API server
+	apiPort, err := incrementPort(port)
+	if err != nil {
+		return fmt.Errorf("failed to calculate API port: %w", err)
+	}
+	
+	apiAddr := net.JoinHostPort(host, apiPort)
+	
 	// Start the HTTP API server
 	go func() {
-		log.Printf("🔒 Sultry OOB API server listening on %s", localAddr)
-		if err := http.ListenAndServe(localAddr, sp.API); err != nil {
-			log.Fatalf("❌ Failed to start API server: %v", err)
+		log.Printf("🔒 Sultry OOB API server listening on %s", apiAddr)
+		if err := http.ListenAndServe(apiAddr, sp.API); err != nil {
+			log.Printf("❌ Failed to start API server: %v", err)
+			// Don't fatal here, as we might still be able to use direct OOB
 		}
 	}()
 	
@@ -69,6 +85,24 @@ func (sp *ServerProxy) Start(localAddr string) error {
 		
 		go sp.handleConnection(conn)
 	}
+}
+
+// incrementPort adds 1 to the port number
+func incrementPort(portStr string) (string, error) {
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", err
+	}
+	
+	// Increment port by 1
+	port++
+	
+	// Ensure we're in valid range
+	if port > 65535 {
+		return "", fmt.Errorf("port number exceeds maximum (65535)")
+	}
+	
+	return strconv.Itoa(port), nil
 }
 
 // handleConnection processes incoming OOB connections

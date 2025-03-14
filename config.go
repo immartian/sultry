@@ -5,20 +5,45 @@ import (
 	"os"
 )
 
+// OOBChannelConfig represents a single OOB channel configuration
+type OOBChannelConfig struct {
+	Type    string `json:"type"`
+	Address string `json:"address,omitempty"`
+	Port    int    `json:"port,omitempty"`
+}
+
 // Config represents the application configuration
 type Config struct {
-	Mode                      string `json:"mode,omitempty"`
-	LocalProxyAddr            string `json:"local_proxy_addr"`
-	RemoteProxyAddr           string `json:"remote_proxy_addr,omitempty"`
-	CoverSNI                  string `json:"cover_sni,omitempty"`
-	PrioritizeSNI             bool   `json:"prioritize_sni_concealment"`
-	OOBChannels               int    `json:"oob_channels,omitempty"`
-	FullClientHelloConcealment bool   `json:"full_clienthello_concealment"`
-	HandshakeTimeout          int    `json:"handshake_timeout,omitempty"`
-	ConnectionPoolSize        int    `json:"connection_pool_size,omitempty"`
-	EnforceTLS13              bool   `json:"enforce_tls13,omitempty"`
-	UseOOBForApplicationData  bool   `json:"use_oob_for_application_data,omitempty"`
-	DirectOOB                 bool   `json:"direct_oob,omitempty"`
+	Mode                      string             `json:"mode,omitempty"`
+	LocalProxyAddr            string             `json:"local_proxy_addr"`
+	RemoteProxyAddr           string             `json:"remote_proxy_addr,omitempty"`
+	RelayPort                 int                `json:"relay_port,omitempty"`
+	CoverSNI                  string             `json:"cover_sni,omitempty"`
+	PrioritizeSNI             bool               `json:"prioritize_sni_concealment"`
+	OOBChannels               interface{}        `json:"oob_channels,omitempty"` // Can be int or []OOBChannelConfig
+	FullClientHelloConcealment bool               `json:"full_clienthello_concealment"`
+	HandshakeTimeout          int                `json:"handshake_timeout,omitempty"`
+	ConnectionPoolSize        int                `json:"connection_pool_size,omitempty"`
+	EnforceTLS13              bool               `json:"enforce_tls13,omitempty"`
+	UseOOBForApplicationData  bool               `json:"use_oob_for_application_data,omitempty"`
+	DirectOOB                 bool               `json:"direct_oob,omitempty"`
+}
+
+// GetOOBChannelsCount returns the number of OOB channels
+func (c *Config) GetOOBChannelsCount() int {
+	// Handle different types of OOBChannels
+	switch v := c.OOBChannels.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case []interface{}:
+		return len(v)
+	case []OOBChannelConfig:
+		return len(v)
+	default:
+		return 2 // Default
+	}
 }
 
 // LoadConfig reads the configuration from the specified file.

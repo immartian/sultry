@@ -29,8 +29,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"sultry/pkg/client"
 	"sultry/pkg/relay"
 	"sultry/pkg/server"
@@ -200,8 +202,28 @@ func startClient(config *Config, serverManager *session.Manager) {
 	} else {
 		// Use HTTP OOB for remote communication
 		log.Println("🔹 Using HTTP OOB implementation for remote communication")
-		oobClient = &OOBModule{
-			ServerAddress: config.RemoteProxyAddr,
+		// Calculate API address based on the remote address
+		host, port, err := net.SplitHostPort(config.RemoteProxyAddr)
+		if err != nil {
+			log.Printf("⚠️ Invalid remote address format %s, using as-is", config.RemoteProxyAddr)
+			oobClient = &OOBModule{
+				ServerAddress: config.RemoteProxyAddr,
+			}
+		} else {
+			// Use port+1 for API as we did in the server
+			apiPort, err := incrementPort(port)
+			if err != nil {
+				log.Printf("⚠️ Failed to calculate API port: %v, using original port", err)
+				oobClient = &OOBModule{
+					ServerAddress: config.RemoteProxyAddr,
+				}
+			} else {
+				apiAddr := net.JoinHostPort(host, apiPort)
+				log.Printf("🔹 Using API address %s", apiAddr)
+				oobClient = &OOBModule{
+					ServerAddress: apiAddr,
+				}
+			}
 		}
 	}
 	
@@ -263,4 +285,22 @@ func setupSignalHandling() {
 		fmt.Println("\nShutting down gracefully...")
 		os.Exit(0)
 	}()
+}
+
+// incrementPort adds 1 to the port number
+func incrementPort(portStr string) (string, error) {
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", err
+	}
+	
+	// Increment port by 1
+	port++
+	
+	// Ensure we're in valid range
+	if port > 65535 {
+		return "", fmt.Errorf("port number exceeds maximum (65535)")
+	}
+	
+	return strconv.Itoa(port), nil
 }
