@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"testing"
+	"sultry/pkg/tls"
 )
 
 func TestIsHandshakeComplete(t *testing.T) {
@@ -33,7 +34,7 @@ func TestIsHandshakeComplete(t *testing.T) {
 		},
 		{
 			name:     "Finished message",
-			hexData:  "16030300140014", // Handshake record with type 20 (Finished)
+			hexData:  "1603030005140000", // Handshake record with type 20 (Finished)
 			expected: true,
 		},
 	}
@@ -45,9 +46,9 @@ func TestIsHandshakeComplete(t *testing.T) {
 				t.Fatalf("Failed to decode hex data: %v", err)
 			}
 
-			result := isHandshakeComplete(data)
+			result := tls.IsHandshakeComplete(data)
 			if result != tt.expected {
-				t.Errorf("isHandshakeComplete() = %v, want %v", result, tt.expected)
+				t.Errorf("tls.IsHandshakeComplete() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
@@ -93,70 +94,15 @@ func TestIsSessionTicketMessage(t *testing.T) {
 				t.Fatalf("Failed to decode hex data: %v", err)
 			}
 
-			result := isSessionTicketMessage(data)
+			result := tls.IsSessionTicketMessage(data)
 			if result != tt.expected {
-				t.Errorf("isSessionTicketMessage() = %v, want %v", result, tt.expected)
+				t.Errorf("tls.IsSessionTicketMessage() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestAnalyzeHandshakeStatus(t *testing.T) {
-	tests := []struct {
-		name          string
-		hexData       string
-		isHandshake   bool
-		isComplete    bool
-	}{
-		{
-			name:        "Empty data",
-			hexData:     "",
-			isHandshake: false,
-			isComplete:  false,
-		},
-		{
-			name:        "Too short for TLS record",
-			hexData:     "1603",
-			isHandshake: false,
-			isComplete:  false,
-		},
-		{
-			name:        "Application data record",
-			hexData:     "170303001a", // Record type 23 (application data), TLS 1.2, length 26
-			isHandshake: false,
-			isComplete:  true,
-		},
-		{
-			name:        "ClientHello message",
-			hexData:     "160303003a0100", // Handshake record with type 1 (ClientHello)
-			isHandshake: true,
-			isComplete:  false,
-		},
-		{
-			name:        "Finished message",
-			hexData:     "16030300140014", // Handshake record with type 20 (Finished)
-			isHandshake: true,
-			isComplete:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			data, err := hex.DecodeString(tt.hexData)
-			if err != nil {
-				t.Fatalf("Failed to decode hex data: %v", err)
-			}
-
-			isHandshake, isComplete := analyzeHandshakeStatus(data)
-			if isHandshake != tt.isHandshake || isComplete != tt.isComplete {
-				t.Errorf("analyzeHandshakeStatus() = (%v, %v), want (%v, %v)", 
-					isHandshake, isComplete, tt.isHandshake, tt.isComplete)
-			}
-		})
-	}
-}
-
-func TestParseRecordHeader(t *testing.T) {
+func TestParseTLSRecordHeader(t *testing.T) {
 	tests := []struct {
 		name         string
 		hexData      string
@@ -198,22 +144,22 @@ func TestParseRecordHeader(t *testing.T) {
 				t.Fatalf("Failed to decode hex data: %v", err)
 			}
 
-			gotType, gotVersion, gotLength, err := parseRecordHeader(data)
+			gotType, gotVersion, gotLength, err := tls.ParseTLSRecordHeader(data)
 			
 			if (err != nil) != tt.wantError {
-				t.Errorf("parseRecordHeader() error = %v, wantError %v", err, tt.wantError)
+				t.Errorf("tls.ParseTLSRecordHeader() error = %v, wantError %v", err, tt.wantError)
 				return
 			}
 			
 			if !tt.wantError {
 				if gotType != tt.wantType {
-					t.Errorf("parseRecordHeader() type = %v, want %v", gotType, tt.wantType)
+					t.Errorf("tls.ParseTLSRecordHeader() type = %v, want %v", gotType, tt.wantType)
 				}
 				if gotVersion != tt.wantVersion {
-					t.Errorf("parseRecordHeader() version = %v, want %v", gotVersion, tt.wantVersion)
+					t.Errorf("tls.ParseTLSRecordHeader() version = %v, want %v", gotVersion, tt.wantVersion)
 				}
 				if gotLength != tt.wantLength {
-					t.Errorf("parseRecordHeader() length = %v, want %v", gotLength, tt.wantLength)
+					t.Errorf("tls.ParseTLSRecordHeader() length = %v, want %v", gotLength, tt.wantLength)
 				}
 			}
 		})

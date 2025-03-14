@@ -3,16 +3,17 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
+	"sultry/pkg/session"
+	"sultry/pkg/tls"
 	"time"
 )
 
-// handleCompleteHandshake handles the complete_handshake endpoint
+// HandleCompleteHandshake handles the complete_handshake endpoint
 // This endpoint is called when the handshake is complete and it's time to establish direct connection
-func handleCompleteHandshake(w http.ResponseWriter, r *http.Request) {
+func HandleCompleteHandshake(w http.ResponseWriter, r *http.Request, manager *session.Manager) {
 	var req struct {
 		SessionID string `json:"session_id"`
 		Action    string `json:"action"`
@@ -23,31 +24,22 @@ func handleCompleteHandshake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionsMu.Lock()
-	session, exists := sessions[req.SessionID]
-	sessionsMu.Unlock()
-
-	if !exists {
+	sessionState := manager.GetSession(req.SessionID)
+	if sessionState == nil {
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
 	// Mark handshake as complete
-	session.HandshakeComplete = true
+	manager.MarkHandshakeComplete(req.SessionID)
 	log.Printf("✅ Handshake marked complete for session %s. Releasing connection.", req.SessionID)
 
 	// Close connection after a brief delay to ensure all buffered data is sent
 	go func() {
 		time.Sleep(500 * time.Millisecond) // Ensure state sync before dropping connection
 		
-		if session.TargetConn != nil {
-			session.TargetConn.Close()
-		}
-		
 		// Remove the session to free up resources
-		sessionsMu.Lock()
-		delete(sessions, req.SessionID)
-		sessionsMu.Unlock()
+		manager.RemoveSession(req.SessionID)
 		
 		log.Printf("🔹 Proxy connection closed for session %s", req.SessionID)
 	}()
@@ -55,9 +47,9 @@ func handleCompleteHandshake(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleGetTargetInfo returns information about the target server for a session
+// HandleGetTargetInfo returns information about the target server for a session
 // This is used by the client to establish a direct connection
-func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
+func HandleGetTargetInfo(w http.ResponseWriter, r *http.Request, manager *session.Manager) {
 	// Parse request
 	var req struct {
 		SessionID   string `json:"session_id"`
@@ -81,25 +73,22 @@ func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
 	log.Printf("🔹 Received target info request for session %s", sessionID)
 
 	// Get the session
-	sessionsMu.Lock()
-	session, exists := sessions[sessionID]
-	sessionsMu.Unlock()
-
-	if !exists || session.TargetConn == nil {
+	sessionState := manager.GetSession(sessionID)
+	if sessionState == nil || sessionState.TargetConn == nil {
 		log.Printf("❌ Session %s not found or invalid for target info", sessionID)
 		http.Error(w, fmt.Sprintf("Session %s not found or invalid", sessionID), http.StatusNotFound)
 		return
 	}
 
 	// Check if handshake is complete
-	if !session.HandshakeComplete {
+	if !sessionState.HandshakeComplete {
 		log.Printf("❌ Handshake not complete for session %s, can't provide target info", sessionID)
 		http.Error(w, fmt.Sprintf("Handshake not complete for session %s", sessionID), http.StatusBadRequest)
 		return
 	}
 
 	// Get target connection information
-	targetAddr := session.TargetConn.RemoteAddr().(*net.TCPAddr)
+	targetAddr := sessionState.TargetConn.RemoteAddr().(*net.TCPAddr)
 	targetHost := targetAddr.IP.String()
 	targetPort := targetAddr.Port
 
@@ -117,8 +106,8 @@ func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Use the SNI as the hostname if available
 	var sni string = targetHost // Default to IP/hostname
-	if len(session.ClientMessages) > 0 {
-		extractedSNI, err := extractSNIFromClientHello(session.ClientMessages[0])
+	if len(sessionState.ClientMessages) > 0 {
+		extractedSNI, err := tls.ExtractSNIFromClientHello(sessionState.ClientMessages[0])
 		if err == nil && extractedSNI != "" {
 			sni = extractedSNI
 			log.Printf("🔹 Using original SNI from ClientHello: %s", sni)
@@ -127,8 +116,8 @@ func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Detect TLS version from the handshake
 	var tlsVersion int = 0x0301 // Default to TLS 1.0
-	if len(session.ServerResponses) > 0 && len(session.ServerResponses[0]) >= 5 {
-		serverHello := session.ServerResponses[0]
+	if len(sessionState.ServerResponses) > 0 && len(sessionState.ServerResponses[0]) >= 5 {
+		serverHello := sessionState.ServerResponses[0]
 		// Extract TLS version from ServerHello
 		tlsVersion = int(uint16(serverHello[1])<<8 | uint16(serverHello[2]))
 		log.Printf("🔹 Detected TLS version: 0x%04x", tlsVersion)
@@ -160,8 +149,8 @@ func handleGetTargetInfo(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ Sent target info for session %s: %s:%d", sessionID, targetHost, targetPort)
 }
 
-// handleReleaseConnection releases a connection when it's no longer needed
-func handleReleaseConnection(w http.ResponseWriter, r *http.Request) {
+// HandleReleaseConnection releases a connection when it's no longer needed
+func HandleReleaseConnection(w http.ResponseWriter, r *http.Request, manager *session.Manager) {
 	var req struct {
 		SessionID string `json:"session_id"`
 		Action    string `json:"action"`
@@ -177,25 +166,22 @@ func handleReleaseConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionsMu.Lock()
-	session, exists := sessions[req.SessionID]
-	if exists {
-		if session.TargetConn != nil {
-			session.TargetConn.Close()
-			log.Printf("🔹 Closed target connection for session %s", req.SessionID)
-		}
-		delete(sessions, req.SessionID)
+	// Check if the session exists
+	sessionState := manager.GetSession(req.SessionID)
+	if sessionState != nil {
+		// Remove the session
+		manager.RemoveSession(req.SessionID)
 		log.Printf("🔹 Released session %s", req.SessionID)
 	}
-	sessionsMu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleGetResponse returns the server response for a given session
-func handleGetResponse(w http.ResponseWriter, r *http.Request) {
+// HandleGetResponse returns the server response for a given session
+func HandleGetResponse(w http.ResponseWriter, r *http.Request, manager *session.Manager) {
 	var req struct {
 		SessionID string `json:"session_id"`
+		Index     int    `json:"index"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -203,30 +189,30 @@ func handleGetResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionsMu.Lock()
-	session, exists := sessions[req.SessionID]
-	sessionsMu.Unlock()
-
-	if !exists {
+	sessionState := manager.GetSession(req.SessionID)
+	if sessionState == nil {
 		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
-	// Update session activity time
-	session.LastActivity = time.Now()
+	// Lock the session for reading responses
+	sessionState.Mu.Lock()
+	defer sessionState.Mu.Unlock()
 
 	// Check if there are any responses to return
-	sessionsMu.Lock()
 	var response []byte
 	var handshakeComplete bool
 
-	if len(session.ServerResponses) > 0 {
-		response = session.ServerResponses[0]
-		session.ServerResponses = session.ServerResponses[1:]
-		log.Printf("🔹 Returning critical first server response (%d bytes)", len(response))
+	// If index is provided, use it, otherwise get the first response
+	if req.Index >= 0 && req.Index < len(sessionState.ServerResponses) {
+		response = sessionState.ServerResponses[req.Index]
+		log.Printf("🔹 Returning server response at index %d (%d bytes)", req.Index, len(response))
+	} else if len(sessionState.ServerResponses) > 0 {
+		response = sessionState.ServerResponses[0]
+		sessionState.ServerResponses = sessionState.ServerResponses[1:]
+		log.Printf("🔹 Returning first server response (%d bytes)", len(response))
 	}
-	handshakeComplete = session.HandshakeComplete
-	sessionsMu.Unlock()
+	handshakeComplete = sessionState.HandshakeComplete
 
 	// Construct response
 	resp := struct {
