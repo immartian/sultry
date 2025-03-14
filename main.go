@@ -29,6 +29,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"sultry/pkg/client"
@@ -130,9 +131,32 @@ func main() {
 
 		// Configure the HTTP OOB client to communicate with the OOB server
 		oobServerAddr := config.RemoteProxyAddr
-		if config.RelayPort > 0 {
-			// Use relay port if specified
+		// Only use localhost if RemoteProxyAddr is not set
+		if oobServerAddr == "" && config.RelayPort > 0 {
+			// Use relay port if specified and no remote address
 			oobServerAddr = fmt.Sprintf("localhost:%d", config.RelayPort)
+		}
+		
+		// Use first OOB channel if available and RemoteProxyAddr is not set
+		if oobServerAddr == "" && config.OOBChannels != nil {
+			// Try to extract the first OOB channel
+			log.Printf("🔒 Looking for OOB channels in config...")
+			if channels, ok := config.OOBChannels.([]interface{}); ok && len(channels) > 0 {
+				if channel, ok := channels[0].(map[string]interface{}); ok {
+					address := channel["address"].(string)
+					port := int(channel["port"].(float64))
+					oobServerAddr = fmt.Sprintf("%s:%d", address, port)
+					log.Printf("🔒 Using first OOB channel from config: %s", oobServerAddr)
+				}
+			}
+		}
+		
+		// Check if the server is available
+		_, err = net.DialTimeout("tcp", oobServerAddr, 100*time.Millisecond)
+		if err != nil {
+			log.Printf("⚠️ WARNING: OOB server at %s is not available.", oobServerAddr)
+			log.Printf("⚠️ You must start a server component separately with: ./bin/sultry -mode server")
+			log.Printf("⚠️ Or use dual mode: ./bin/sultry -mode dual")
 		}
 		
 		log.Printf("🔒 SNI CONCEALMENT: Using OOB server at %s", oobServerAddr)

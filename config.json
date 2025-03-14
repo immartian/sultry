@@ -4,6 +4,11 @@
     "oob_channels": [
       {
         "type": "http",
+        "address": "192.168.2.24", 
+        "port": 9008
+      },
+      {
+        "type": "http",
         "address": "127.0.0.1", 
         "port": 9008
       },
