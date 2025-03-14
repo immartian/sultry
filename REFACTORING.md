@@ -24,7 +24,10 @@ pkg/
 ├── tls/         # TLS protocol handling - IMPLEMENTED
 ├── relay/       # Connection relay functionality - IMPLEMENTED
 ├── session/     # Session management - IMPLEMENTED
-└── handlers/    # HTTP handlers - PARTIALLY IMPLEMENTED
+├── connection/  # Connection handling - IMPLEMENTED
+├── client/      # Client-side functionality - IMPLEMENTED
+├── server/      # Server-side functionality - IMPLEMENTED
+└── handlers/    # HTTP handlers - IMPLEMENTED
 ```
 
 ### Phase 1 Progress: Function Extraction
@@ -33,9 +36,16 @@ pkg/
 - TLS utility functions have been moved to pkg/tls
 - Session ticket management has been moved to pkg/session 
 - Relay functionality has been moved to pkg/relay
+- Connection handling moved to pkg/connection
+- Client proxy functionality moved to pkg/client
+- Server proxy functionality moved to pkg/server
+- DirectOOB implementation for function-call based communication
 
-🚧 In Progress:
-- Many functions still remain in client.go and server.go
+✅ Optimizations:
+- Eliminated HTTP API overhead with direct function calls
+- Enhanced TLS record handling for proper protocol compliance
+- Improved connection lifecycle management
+- Added detailed logging for better debugging
 
 ### Phase 2 TODO: Interface Definition
 

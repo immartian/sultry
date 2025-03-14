@@ -47,52 +47,75 @@ The server-side proxy is responsible for:
 
 ### Out-of-Band (OOB) Module
 
-The OOB module handles communication between client and server components through alternative channels:
+The OOB module handles communication between client and server components:
 
-1. HTTP-based protocols for relaying handshake information
-2. Session management and synchronization
-3. Target server discovery and resolution
+1. Direct function calls when components are in the same process (primary mode)
+2. Optional HTTP-based protocols for distributed deployment
+3. Session management and synchronization
+4. Target server discovery and resolution
+
+The DirectOOB implementation eliminates network overhead when components run locally by using direct function calls instead of HTTP API requests.
 
 ## Connection Flows
 
 ### Full ClientHello Concealment (Primary Flow)
 
+#### Modular Architecture with Direct OOB
+
+```
+┌────────┐          ┌─────────────────────────────────┐          ┌────────┐
+│        │          │           Proxy Process         │          │        │
+│ Client │───HTTPS──►  ┌────────┐        ┌─────────┐  │          │ Target │
+│        │          │  │ Client │◄─────►││OOB Proxy│  │          │        │
+└────────┘          │  │ Module │        │ Module  │  │          └────────┘
+    │               │  └────────┘        └─────────┘  │              │
+    │               └─────────────────────────────────┘              │
+    │ 1. ClientHello     │                   │                       │
+    │───────────────────►│                   │                       │
+    │                    │ 2. DirectOOB Call │                       │
+    │                    │───────────────────►                       │
+    │                    │                   │ 3. Connect & Send     │
+    │                    │                   │ ClientHello           │
+    │                    │                   │──────────────────────►│
+    │                    │                   │                       │
+    │                    │                   │ 4. ServerHello        │
+    │                    │                   │◄──────────────────────│
+    │                    │ 5. Direct Return  │                       │
+    │                    │◄───────────────────                       │
+    │ 6. ServerHello     │                   │                       │
+    │◄───────────────────│                   │                       │
+    │                    │                   │                       │
+    │ 7. Handshake       │                   │                       │
+    │   Completion       │                   │                       │
+    │───────────────────►│                   │                       │
+    │                    │ 8. DirectOOB Call │                       │
+    │                    │───────────────────►                       │
+    │                    │                   │ 9. Release Proxy      │
+    │                    │                   │   Connection          │
+    │                    │                   │──────────────────────►│
+    │                    │                   │                       │
+    │ 10. Application Data (Direct TLS Relay)│                       │
+    │───────────────────────────────────────────────────────────────►│
+    │                    │                   │                       │
+    │◄──────────────────────────────────────────────────────────────│
+```
+
+#### Optional Distributed Mode with HTTP API
+
+When client and server components are deployed on different machines, the system can fall back to HTTP-based OOB communication:
+
 ```
 ┌────────┐          ┌────────┐          ┌─────────┐          ┌────────┐
 │        │          │        │          │         │          │        │
-│ Client │───HTTPS──►  Proxy │          │OOB Proxy│          │ Target │
+│ Client │───HTTPS──►  Proxy │───HTTP───►OOB Proxy│───TLS────► Target │
 │        │          │        │          │         │          │        │
 └────────┘          └────────┘          └─────────┘          └────────┘
     │                    │                   │                    │
     │ 1. ClientHello     │                   │                    │
     │───────────────────►│                   │                    │
-    │                    │ 2. Relay via OOB  │                    │
+    │                    │ 2. HTTP API Call  │                    │
     │                    │───────────────────►                    │
-    │                    │                   │ 3. Connect & Send  │
-    │                    │                   │ ClientHello        │
-    │                    │                   │───────────────────►│
-    │                    │                   │                    │
-    │                    │                   │ 4. ServerHello     │
-    │                    │                   │◄───────────────────│
-    │                    │ 5. Relay via OOB  │                    │
-    │                    │◄───────────────────                    │
-    │ 6. ServerHello     │                   │                    │
-    │◄───────────────────│                   │                    │
-    │                    │                   │                    │
-    │ 7. Handshake       │                   │                    │
-    │   Completion       │                   │                    │
-    │───────────────────►│                   │                    │
-    │                    │ 8. Signal Handshake                    │
-    │                    │   Completion      │                    │
-    │                    │───────────────────►                    │
-    │                    │                   │ 9. Release Proxy   │
-    │                    │                   │   Connection       │
-    │                    │                   │───────────────────►│
-    │                    │                   │                    │
-    │ 10. Direct Application Data            │                    │
-    │────────────────────────────────────────────────────────────►│
-    │                    │                   │                    │
-    │◄───────────────────────────────────────────────────────────│
+    ...
 ```
 
 ### Direct Connection Establishment

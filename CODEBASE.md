@@ -40,6 +40,8 @@ Manages connection state:
 - Server-side session state (manager.go) 
 - Session ticket handling for TLS resumption (session.go)
 - Target info tracking across OOB communications
+- DirectOOB implementation using function calls instead of HTTP API
+- OOB client interfaces for both direct and HTTP-based communication
 
 ### 3. Relay Functions (pkg/relay)
 
@@ -47,15 +49,21 @@ Handles data transfer between connections:
 - Bidirectional data relay with TLS awareness (relay.go)
 - Direct connection establishment (tunnel.go)
 - Session ticket detection during relaying
+- Enhanced TLS record boundary handling for protocol compliance
+- Efficient io.Copy based relay for reliable data transfer
+- Proper TCP connection half-close operations for clean termination
 
 ### 4. Connection Handling (pkg/connection)
 
 Manages different connection types:
 - HTTP CONNECT tunnel handling
 - Direct TLS connection handling
-- OOB tunnel handling
-- Full ClientHello concealment strategy
+- OOB tunnel handling with direct function calls
+- Full ClientHello concealment with detailed TLS flow monitoring
 - SNI-only concealment strategy
+- Detailed logging of TLS record types and handshake messages
+- Proper handshake completion detection and handling
+- Reliable application data transfer after handshake
 
 ### 5. Client Implementation (pkg/client)
 
@@ -102,6 +110,11 @@ The following optimizations have been implemented:
 5. ✅ **Create smaller, focused implementations** of client and server components
 6. ✅ **Eliminate HTTP API overhead** with direct OOB communication option
 7. ✅ **Automatic port management** to prevent conflicts between TCP and HTTP servers
+8. ✅ **Enhance TLS record handling** for proper protocol compliance
+9. ✅ **Implement robust application data transfer** with proper TLS flow
+10. ✅ **Add detailed logging** for all TLS message types and states
+11. ✅ **Clear identification of DirectOOB mode** in logs
+12. ✅ **Fix TCP connection termination** with proper half-close operations
 
 ## Implementation Practices
 
