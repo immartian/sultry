@@ -2,76 +2,90 @@
 
 ## Project Structure
 
-Sultry is a specialized TLS proxy designed for SNI concealment and censorship circumvention. The codebase has the following structure:
+Sultry is a specialized TLS proxy designed for SNI concealment and censorship circumvention. The codebase has been refactored into a modular structure:
 
 ```
 sultry/
-├── client.go       # Client-side proxy implementation
-├── server.go       # Server-side proxy implementation
+├── client.go       # Original client-side proxy implementation
+├── server.go       # Original server-side proxy implementation
 ├── config.go       # Configuration handling
-├── utils.go        # TLS utility functions
+├── utils.go        # Original TLS utility functions
 ├── oob.go          # Out-of-Band (OOB) communication module
-├── main.go         # Entry point
+├── main.go         # Updated entry point supporting modular architecture
+├── cmd/
+│   └── minimal/    # Minimal implementation using modular packages
+├── pkg/
+│   ├── client/     # Client-side proxy functionality
+│   ├── connection/ # Connection handling
+│   ├── relay/      # Data relay functionality
+│   ├── server/     # Server-side proxy functionality
+│   ├── session/    # Session management
+│   └── tls/        # TLS protocol utilities
 └── test.sh         # Integration test script
 ```
 
 ## Core Components
 
-### 1. TLS Proxy (client.go)
+### Original Monolithic Components
 
-The core proxy functionality is implemented in client.go and divided into several connection strategies:
+The original implementation consists of large files:
 
-1. **OOB Handshake Relay**
-   - Full ClientHello Concealment - Entire ClientHello relayed via OOB
-   - SNI-only Concealment - Only SNI info sent via OOB
+1. **client.go** (2131 lines): Client-side proxy implementation
+2. **server.go** (1761 lines): Server-side proxy implementation
+3. **oob.go**: Out-of-Band communication module
+4. **config.go**: Configuration handling
+5. **utils.go**: TLS utility functions
 
-2. **Pure Tunnel Mode**
-   - Standard HTTP CONNECT proxy tunneling
+### Modular Implementation
 
-3. **Direct HTTP Fetch**
-   - For handling plain HTTP requests 
+The modular implementation breaks down functionality into focused packages:
 
-The TLS proxy adapts its strategy based on configuration and runtime conditions, attempting to provide the most secure connection possible.
+### 1. TLS Module (pkg/tls)
 
-### 2. Server Component (server.go)
+Handles TLS protocol operations:
+- Record header parsing and validation
+- Message type detection
+- Handshake completion detection
+- SNI extraction from ClientHello
+- Session ticket message detection
 
-The server.go file implements the server-side functions:
+### 2. Session Management (pkg/session)
 
-1. **HTTP API for OOB communication**
-   - Various endpoints for handshake relay
-   - Session management for connections 
+Manages connection state:
+- Client-side session operations (client_session.go)
+- Server-side session state (manager.go) 
+- Session ticket handling for TLS resumption (session.go)
+- Target info tracking across OOB communications
 
-2. **Target Connection Management**
-   - Establishing connections to target servers
-   - Relaying data between client and target
+### 3. Relay Functions (pkg/relay)
 
-3. **Handshake Handling**
-   - Detecting handshake completion
-   - Session ticket management
-   - SSL/TLS protocol parsing
+Handles data transfer between connections:
+- Bidirectional data relay with TLS awareness (relay.go)
+- Direct connection establishment (tunnel.go)
+- Session ticket detection during relaying
 
-### 3. OOB Module (oob.go)
+### 4. Connection Handling (pkg/connection)
 
-The Out-of-Band module supports alternative channels for relaying handshake information:
+Manages different connection types:
+- HTTP CONNECT tunnel handling
+- Direct TLS connection handling
+- OOB tunnel handling
+- Full ClientHello concealment strategy
+- SNI-only concealment strategy
 
-1. **HTTP-based relay channel**
-   - Primary channel for ClientHello and ServerHello messages
+### 5. Client Implementation (pkg/client)
 
-2. **Channel Management**
-   - Peer discovery
-   - Fallback mechanism
+Simplified client-side proxy:
+- Connection acceptance and routing
+- Functional options pattern for configuration
+- Delegate to connection package for specific handling
 
-### 4. Utils (utils.go)
+### 6. Server Implementation (pkg/server)
 
-Utility functions focused on TLS protocol parsing:
-
-1. **TLS Record Handling**
-   - Record header parsing
-   - Message type detection
-   - Handshake completion detection
-
-2. **SNI Extraction**
-   - Reading SNI extension from ClientHello
+Simplified server-side proxy:
+- HTTP API endpoints for OOB communication
+- Session management
+- Target connection handling
 
 ## Key Functional Flows
 
@@ -93,14 +107,15 @@ Utility functions focused on TLS protocol parsing:
 3. Future connections can use session resumption
 4. Resumption allows skipping full handshake
 
-## Optimization Opportunities
+## Completed Optimizations
 
-The codebase has potential for further optimization:
+The following optimizations have been implemented:
 
-1. **Extract session management code** from server.go into a separate module
-2. **Create a dedicated module for HTTP handlers** to slim down server.go
-3. **Split large relay functions** from client.go into a separate file
-4. **Modularize connection strategies** in client.go for better maintainability
+1. ✅ **Extract session management code** into pkg/session
+2. ✅ **Create a dedicated module for relay functions** in pkg/relay
+3. ✅ **Modularize connection strategies** in pkg/connection
+4. ✅ **Implement proper TLS utilities module** in pkg/tls
+5. ✅ **Create smaller, focused implementations** of client and server components
 
 ## Implementation Practices
 
@@ -111,3 +126,29 @@ The codebase follows several key practices:
 3. **Timeout handling** to prevent resource leakage
 4. **Fallback mechanisms** when primary strategies fail
 5. **Atomic writes** for TLS records to avoid partial record transmission
+6. **Separation of concerns** with each package handling specific functionality
+7. **Functional options pattern** for flexible configuration
+8. **Interface-based design** for improved testability
+9. **Both modular and original implementations** maintained for compatibility
+
+## Building and Running
+
+The project includes a Makefile with the following targets:
+
+```
+make build           # Build both original and modular versions
+make build-original  # Build only the original version
+make build-modular   # Build only the modular version
+make clean           # Clean up binaries
+make test            # Run tests
+```
+
+After building, you can run either version:
+
+```
+# Original version
+./bin/sultry -mode client -local 127.0.0.1:8080
+
+# Modular version
+./bin/sultry-mod -mode client -local 127.0.0.1:8080
+```

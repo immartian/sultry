@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+// Note: TargetInfo is defined in client_session.go
+
+// SessionState represents the state of a TLS session
+type SessionState struct {
+	TargetConn        net.Conn     // Connection to target server
+	ClientMessages    [][]byte     // Client messages in sequence
+	ServerResponses   [][]byte     // Server responses in sequence
+	HandshakeComplete bool         // Whether handshake is complete
+	LastActivity      time.Time    // Last activity time for timeout
+	ConnectedAt       time.Time    // When the connection was established
+	SNI               string       // Server Name Indication
+	SessionTicket     []byte       // TLS session ticket for resumption
+	ResponseQueue     chan []byte  // Channel for response queue
+	Adopted           bool         // Whether the connection has been adopted
+	ServerMsgIndex    int          // Index into ServerResponses for direct access
+	Mu                sync.Mutex   // Protects all fields in this struct
+}
+
 // Manager handles session management
 type Manager struct {
 	sessions   map[string]*SessionState

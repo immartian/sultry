@@ -19,8 +19,8 @@ var (
 	sessionTicketsMu   sync.RWMutex
 )
 
-// storeSessionTicket stores a session ticket for a given hostname
-func storeSessionTicket(hostname string, data []byte) {
+// StoreSessionTicket stores a session ticket for a given hostname
+func StoreSessionTicket(hostname string, data []byte) {
 	if hostname == "" || len(data) == 0 {
 		log.Printf("⚠️ Cannot store session ticket: invalid hostname or data")
 		return
@@ -42,8 +42,8 @@ func storeSessionTicket(hostname string, data []byte) {
 	log.Printf("✅ Stored session ticket for %s (%d bytes)", hostname, len(data))
 }
 
-// hasValidSessionTicket checks if we have a valid session ticket for the given server
-func hasValidSessionTicket(targetServer string) (bool, []byte) {
+// HasValidSessionTicket checks if we have a valid session ticket for the given server
+func HasValidSessionTicket(targetServer string) (bool, []byte) {
 	sessionTicketsMu.RLock()
 	defer sessionTicketsMu.RUnlock()
 	

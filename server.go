@@ -1026,13 +1026,13 @@ func handleAdoptConnection(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
-// Helper function for min
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
+// Helper function for min (using utils.go implementation instead)
+// func min(a, b int) int {
+// 	if a < b {
+// 		return a
+// 	}
+// 	return b
+// }
 
 // Extract SNI from ClientHello for target info
 func extractSNIFromClientHello(clientHello []byte) (string, error) {

@@ -1,33 +1,37 @@
-# Modular Code Structure (Future Implementation)
+# Sultry Modular Implementation
 
-This directory contains a proposed modular structure for the Sultry codebase. The goal is to break down the large client.go and server.go files into smaller, more focused modules.
+This directory contains the early development of the modular version of Sultry. Note that the development has now been moved to the main `pkg/` directory for better integration.
 
-## Current Files
+## Overview
 
-- **relay.go**: Contains functions for relaying data between connections
-- **handlers.go**: Contains HTTP handler functions for the server component
-- **tunnel.go**: Contains functions for establishing direct connections after handshake
-- **tls.go**: Contains TLS protocol utilities and constants
+The modular version separates the large monolithic files (client.go and server.go) into smaller, more maintainable packages:
 
-## Implementation Strategy
+- **tls.go**: TLS protocol utilities
+- **relay.go**: Data relay functionality
+- **handlers.go**: HTTP handlers for the server API
+- **tunnel.go**: Direct connection establishment
 
-The files in this directory are not currently used in the build but serve as a blueprint for future refactoring. To implement this modular approach:
+## Features
 
-1. Carefully remove the corresponding functions from client.go and server.go
-2. Move these files to the root directory
-3. Update imports as necessary
-4. Resolve any naming conflicts or duplicate functions
+- SNI concealment for improved privacy and censorship resistance
+- TLS record parsing and analysis
+- Session ticket management
+- Out-of-band relay for handshake data
 
-## Benefits of Modularization
+## Current Status
 
-- **Improved readability**: Smaller files with clear responsibilities
-- **Better maintainability**: Changes to one module don't affect others
-- **Easier testing**: Modules can be tested independently
-- **Simpler collaboration**: Multiple developers can work on different modules
-- **More flexibility**: Modules can be reused across different components
+The modular implementation has been completed and moved to the main `pkg/` directory structure. This directory serves as historical reference for the initial modular design.
 
-## Implementation Notes
+Please use the implementation in `pkg/` for the latest version.
 
-The modular structure was designed to minimize changes to the existing code while improving maintainability. The functions in these files match the signatures of the original functions to make the transition smoother.
+## Usage
 
-Each file contains clear comments explaining the purpose and usage of each function, making it easier for new developers to understand the codebase.
+See the main README.md and CODEBASE.md for detailed usage instructions of the modular version.
+
+```bash
+# Build the modular version
+make build-modular
+
+# Run it
+./bin/sultry-mod -mode client -local 127.0.0.1:8080
+```

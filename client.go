@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	
+	"sultry/pkg/relay"
+	"sultry/pkg/session"
+	"sultry/pkg/tls"
 )
 
 // TargetInfo holds information about the target server
@@ -39,112 +42,9 @@ type DirectConnectCommand struct {
 	MasterSecret  []byte `json:"master_secret"`
 }
 
-// Session ticket storage for TLS session resumption
-type SessionTicket struct {
-	Data      []byte    `json:"data"`
-	Timestamp time.Time `json:"timestamp"`
-	SNI       string    `json:"sni"`
-}
+// NOTE: Session ticket functionality has been moved to pkg/session/session.go
 
-var (
-	// Store session tickets by hostname
-	sessionTickets     = make(map[string]*SessionTicket)
-	sessionTicketsMu   sync.RWMutex
-)
-
-// storeSessionTicket stores a session ticket for a given hostname
-func storeSessionTicket(hostname string, data []byte) {
-	if hostname == "" || len(data) == 0 {
-		log.Printf("⚠️ Cannot store session ticket: invalid hostname or data")
-		return
-	}
-
-	sessionTicketsMu.Lock()
-	defer sessionTicketsMu.Unlock()
-
-	// Create a copy of the data to ensure it persists
-	ticketData := make([]byte, len(data))
-	copy(ticketData, data)
-
-	sessionTickets[hostname] = &SessionTicket{
-		Data:      ticketData,
-		Timestamp: time.Now(),
-		SNI:       hostname,
-	}
-
-	log.Printf("✅ Stored session ticket for %s (%d bytes)", hostname, len(data))
-}
-
-// hasValidSessionTicket checks if we have a valid session ticket for the given server
-func hasValidSessionTicket(targetServer string) (bool, []byte) {
-	sessionTicketsMu.RLock()
-	defer sessionTicketsMu.RUnlock()
-	
-	ticket, exists := sessionTickets[targetServer]
-	if !exists || ticket == nil || len(ticket.Data) == 0 {
-		return false, nil
-	}
-	
-	// Check if the ticket has expired (24 hours)
-	if time.Since(ticket.Timestamp) > 24*time.Hour {
-		log.Printf("⚠️ Session ticket for %s has expired", targetServer)
-		return false, nil
-	}
-	
-	log.Printf("✅ Found valid session ticket for %s (%d bytes, age: %s)",
-		targetServer, len(ticket.Data), time.Since(ticket.Timestamp))
-	return true, ticket.Data
-}
-
-// relayDataWithSessionTicketDetection relays data and checks for session tickets
-func relayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label string, processData func([]byte)) {
-	defer func() {
-		log.Printf("🔹 %s: Connection closed normally", label)
-	}()
-
-	for {
-		src.SetReadDeadline(time.Now().Add(60 * time.Second))
-		n, err := src.Read(buffer)
-		src.SetReadDeadline(time.Time{}) // Clear deadline
-
-		if err != nil {
-			if err != io.EOF && !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "reset") {
-				log.Printf("❌ %s: Error reading: %v", label, err)
-			}
-			return
-		}
-
-		if n > 0 {
-			// Check for session ticket in the TLS records
-			if n >= 6 && buffer[0] == RecordTypeHandshake && buffer[5] == HandshakeTypeNewSessionTicket {
-				log.Printf("🎫 %s: Detected NewSessionTicket message (%d bytes)", label, n)
-				
-				// Check if we have a handler for this
-				if processData != nil {
-					processData(buffer[:n])
-				}
-			} else if n >= 5 {
-				recordType, version, _, _ := parseTLSRecordHeader(buffer[:n])
-				if recordType >= 20 && recordType <= 24 {
-					log.Printf("🔹 %s: TLS Record: Type=%d, Version=0x%04x, Length=%d/%d",
-						label, recordType, version, n-5, n)
-				}
-				
-				// Call the optional data processor if provided
-				if processData != nil {
-					processData(buffer[:n])
-				}
-			}
-
-			// Write the data
-			_, err := dst.Write(buffer[:n])
-			if err != nil {
-				log.Printf("❌ %s: Error writing: %v", label, err)
-				return
-			}
-		}
-	}
-}
+// relayDataWithSessionTicketDetection was moved to pkg/relay/relay.go
 
 // TLSProxy handles the proxy functionality with multiple connection strategies.
 // It supports several methods to establish connections to target servers:
@@ -158,11 +58,12 @@ func relayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 // SNI information from network monitors or firewalls, as the ClientHello containing
 // the SNI is sent via HTTP to the OOB server rather than directly to the target.
 type TLSProxy struct {
-	OOB                        *OOBModule // Out-of-Band communication module for handshake relay
-	FakeSNI                    string     // Optional SNI value to use instead of the actual target
-	PrioritizeSNI              bool       // Whether to prioritize SNI concealment over direct tunneling
-	FullClientHelloConcealment bool       // Whether to use full ClientHello concealment for maximum protection
-	HandshakeTimeout           int        // Timeout in milliseconds for handshake operations
+	OOB                        *OOBModule       // Out-of-Band communication module for handshake relay
+	SessionManager             *session.SessionManager // Session management
+	FakeSNI                    string           // Optional SNI value to use instead of the actual target
+	PrioritizeSNI              bool             // Whether to prioritize SNI concealment over direct tunneling
+	FullClientHelloConcealment bool             // Whether to use full ClientHello concealment for maximum protection
+	HandshakeTimeout           int              // Timeout in milliseconds for handshake operations
 }
 
 // Start runs the TLS proxy.
@@ -186,8 +87,10 @@ func (p *TLSProxy) Start(localAddr string) {
 
 func client(config *Config) {
 	oobModule := NewOOBModule(config.OOBChannels)
+	sessionManager := session.NewSessionManager(oobModule)
 	proxy := TLSProxy{
 		OOB:                        oobModule,
+		SessionManager:             sessionManager,
 		FakeSNI:                    config.CoverSNI,
 		PrioritizeSNI:              config.PrioritizeSNI,
 		FullClientHelloConcealment: config.FullClientHelloConcealment,
@@ -516,7 +419,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 	// Apply concealment strategies if configured
 	if p.PrioritizeSNI {
 		// Extract SNI from ClientHello
-		sni, err := extractSNI(clientHello)
+		sni, err := tls.ExtractSNIFromClientHello(clientHello)
 		if err != nil {
 			log.Printf("⚠️ Failed to extract SNI from ClientHello: %v", err)
 			// Use hostname from CONNECT request as fallback
@@ -618,7 +521,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		defer func() {
 			// Signal handshake completion
 			log.Printf("🔹 Signaling handshake completion to server...")
-			p.signalHandshakeCompletion(sessionID)
+			p.SessionManager.SignalHandshakeCompletion(sessionID)
 		}()
 
 		// Goroutine to receive server responses via OOB and forward to client
@@ -676,7 +579,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 				if len(response.Data) >= 5 {
 					recordType := response.Data[0]
 					// Only interpret as TLS record if it's a valid TLS record type (20-24)
-					if recordType >= 20 && recordType <= 24 {
+					if recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 						version := (uint16(response.Data[1]) << 8) | uint16(response.Data[2])
 						length := (uint16(response.Data[3]) << 8) | uint16(response.Data[4])
 						log.Printf("🔹 TLS Record from server: Type=%d, Version=0x%04x, Length=%d",
@@ -755,7 +658,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 					if n >= 5 {
 						recordType := buffer[0]
 						// Only interpret as TLS record if it's a valid TLS record type (20-24)
-						if recordType >= 20 && recordType <= 24 {
+						if recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 							version := (uint16(buffer[1]) << 8) | uint16(buffer[2])
 							length := (uint16(buffer[3]) << 8) | uint16(buffer[4])
 							log.Printf("🔹 TLS Record from client: Type=%d, Version=0x%04x, Length=%d",
@@ -807,7 +710,7 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 
 		// Signal handshake completion to the server
 		log.Printf("🔹 Signaling handshake completion to server...")
-		err = p.signalHandshakeCompletion(sessionID)
+		err = p.SessionManager.SignalHandshakeCompletion(sessionID)
 		if err != nil {
 			log.Printf("❌ Failed to signal handshake completion: %v", err)
 			// Continue anyway as this is non-critical
@@ -828,13 +731,13 @@ func (p *TLSProxy) handleTunnelConnect(clientConn net.Conn, hostPort string) {
 		log.Printf("✅ Starting bidirectional relay between client and direct connection")
 		buffer1 := make([]byte, 32768)
 		buffer2 := make([]byte, 32768)
-		go relayDataWithSessionTicketDetection(clientConn, targetConn, buffer1, "client → target", nil)
-		go relayDataWithSessionTicketDetection(targetConn, clientConn, buffer2, "target → client", func(data []byte) {
+		go relay.RelayDataWithSessionTicketDetection(clientConn, targetConn, buffer1, "client → target", nil)
+		go relay.RelayDataWithSessionTicketDetection(targetConn, clientConn, buffer2, "target → client", func(data []byte) {
 			// Check for session ticket in data from server to client
-			if isSessionTicketMessage(data) {
+			if tls.IsSessionTicketMessage(data) {
 				log.Printf("🎫 Session Ticket received from server for %s", host)
 				// Store the session ticket for future connections
-				storeSessionTicket(host, data)
+				session.StoreSessionTicket(host, data)
 			}
 		})
 		
@@ -899,14 +802,14 @@ skipClientHello:
 	go func() {
 		defer wg.Done()
 		buffer := make([]byte, 16384) // 16KB buffer to match typical TLS record size
-		relayData(clientConn, targetConn, buffer, "Client -> Target")
+		relay.RelayData(clientConn, targetConn, buffer, "Client -> Target")
 	}()
 
 	// Target -> Client
 	go func() {
 		defer wg.Done()
 		buffer := make([]byte, 16384) // 16KB buffer to match typical TLS record size
-		relayData(targetConn, clientConn, buffer, "Target -> Client")
+		relay.RelayData(targetConn, clientConn, buffer, "Target -> Client")
 	}()
 
 	// Wait for both directions to complete
@@ -996,7 +899,7 @@ func (p *TLSProxy) handleProxyConnection(clientConn net.Conn, reader *bufio.Read
 
 	// Extract SNI if not already set from CONNECT
 	if sni == "" {
-		extractedSNI, err := extractSNI(clientHelloData)
+		extractedSNI, err := tls.ExtractSNIFromClientHello(clientHelloData)
 		if err != nil {
 			log.Println("ℹ️ INFO: Failed to extract SNI:", err)
 		} else {
@@ -1124,7 +1027,7 @@ func (p *TLSProxy) handleProxyConnection(clientConn net.Conn, reader *bufio.Read
 			if len(response.Data) >= 5 {
 				recordType := response.Data[0]
 				// Only interpret as TLS record if it's a valid TLS record type (20-24)
-				if recordType >= 20 && recordType <= 24 {
+				if recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 					version := (uint16(response.Data[1]) << 8) | uint16(response.Data[2])
 					length := (uint16(response.Data[3]) << 8) | uint16(response.Data[4])
 					log.Printf("🔹 TLS Record from server: Type=%d, Version=0x%04x, Length=%d",
@@ -1197,7 +1100,7 @@ func (p *TLSProxy) handleProxyConnection(clientConn net.Conn, reader *bufio.Read
 				if n >= 5 {
 					recordType := buffer[0]
 					// Only interpret as TLS record if it's a valid TLS record type (20-24)
-					if recordType >= 20 && recordType <= 24 {
+					if recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 						version := (uint16(buffer[1]) << 8) | uint16(buffer[2])
 						length := (uint16(buffer[3]) << 8) | uint16(buffer[4])
 						log.Printf("🔹 TLS Record from client: Type=%d, Version=0x%04x, Length=%d",
@@ -1243,7 +1146,7 @@ func (p *TLSProxy) handleProxyConnection(clientConn net.Conn, reader *bufio.Read
 
 	// Signal handshake completion to the server regardless of how we got here
 	log.Println("🔹 Signaling handshake completion to server...")
-	err = p.signalHandshakeCompletion(sessionID)
+	err = p.SessionManager.SignalHandshakeCompletion(sessionID)
 	if err != nil {
 		log.Println("❌ ERROR: Failed to signal handshake completion:", err)
 		// Continue anyway with adoptConnection as a fallback
@@ -1257,34 +1160,14 @@ func (p *TLSProxy) handleProxyConnection(clientConn net.Conn, reader *bufio.Read
 }
 
 // In your main.go, add a function to signal handshake completion
-func (p *TLSProxy) signalHandshakeCompletion(sessionID string) error {
-	// Signal to the server that handshake is complete
-	reqBody := fmt.Sprintf(`{"session_id":"%s", "action":"complete_handshake"}`, sessionID)
-	resp, err := http.Post(
-		fmt.Sprintf("http://%s/complete_handshake", p.OOB.GetServerAddress()),
-		"application/json",
-		strings.NewReader(reqBody),
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to signal handshake completion: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server rejected handshake completion: %s", string(body))
-	}
-
-	return nil
-}
+// signalHandshakeCompletion has been moved to pkg/session/client_session.go
 
 // Establishes direct connection through server relay after handshake completion
 func (p *TLSProxy) adoptConnection(clientConn net.Conn, sessionID string, clientHelloData []byte) {
 	log.Printf("🔹 Begin connection adoption for session %s", sessionID)
 
 	// Step 1: Get target connection information from OOB server
-	targetInfo, err := p.getTargetInfo(sessionID, clientHelloData)
+	targetInfo, err := p.SessionManager.GetTargetInfo(sessionID, clientHelloData)
 	if err != nil {
 		log.Printf("❌ ERROR: Failed to get target info: %v", err)
 		log.Printf("🔹 Proceeding with adoption anyway")
@@ -1300,86 +1183,13 @@ func (p *TLSProxy) adoptConnection(clientConn net.Conn, sessionID string, client
 	// Step 3: Attempt to release connection resources on OOB server
 	// This is best-effort and non-critical - we don't care if it fails
 	// The direct fetch approach might cause connection resets before this happens
-	p.releaseOOBConnection(sessionID) // Ignore any errors
+	p.SessionManager.ReleaseConnection(sessionID) // Ignore any errors
 	log.Printf("✅ OOB resources release attempted for session %s", sessionID)
 }
 
-// getTargetInfo retrieves information about the target server
-func (p *TLSProxy) getTargetInfo(sessionID string, clientHelloData []byte) (*TargetInfo, error) {
-	// Prepare request with both session ID and ClientHello data
-	requestData := struct {
-		SessionID   string `json:"session_id"`
-		Action      string `json:"action"`
-		ClientHello []byte `json:"client_hello,omitempty"`
-	}{
-		SessionID:   sessionID,
-		Action:      "get_target_info",
-		ClientHello: clientHelloData,
-	}
+// getTargetInfo has been moved to pkg/session/client_session.go
 
-	requestBytes, err := json.Marshal(requestData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Send request to OOB server with timeout
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("http://%s/get_target_info", p.OOB.GetServerAddress()),
-		"application/json",
-		bytes.NewReader(requestBytes),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get target info: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("server error: %s (code %d)", string(body), resp.StatusCode)
-	}
-
-	// Parse response
-	var targetInfo TargetInfo
-	if err := json.NewDecoder(resp.Body).Decode(&targetInfo); err != nil {
-		return nil, fmt.Errorf("failed to decode target info: %w", err)
-	}
-
-	// Validate essential target info
-	if targetInfo.TargetHost == "" || targetInfo.TargetPort == 0 {
-		return nil, fmt.Errorf("received incomplete target info")
-	}
-
-	return &targetInfo, nil
-}
-
-// Update releaseOOBConnection with better error handling for direct fetch mode
-func (p *TLSProxy) releaseOOBConnection(sessionID string) error {
-	reqBody := fmt.Sprintf(`{"session_id":"%s","action":"release_connection"}`, sessionID)
-
-	// Use a client with short timeout to avoid hanging
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("http://%s/release_connection", p.OOB.GetServerAddress()),
-		"application/json",
-		strings.NewReader(reqBody),
-	)
-
-	if err != nil {
-		// Don't fail on release errors - they're common with direct fetch approach
-		log.Printf("ℹ️ Warning: Unable to release connection: %v (this is normal with direct fetch)", err)
-		return nil // Don't fail on release errors
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("ℹ️ Warning: Server returned non-OK status: %s (continuing anyway)", string(body))
-		return nil // Don't fail on non-OK responses
-	}
-
-	return nil
-}
+// releaseOOBConnection has been moved to pkg/session/client_session.go as ReleaseConnection
 
 // AdoptDirectConnection establishes a direct connection to the target server via the relay
 func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
@@ -1410,13 +1220,13 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 
 	// Send the adoption request
 	// Get the target information for ALPN protocol detection
-	_, err = p.getTargetInfo(sessionID, nil)
+	_, err = p.SessionManager.GetTargetInfo(sessionID, nil)
 
 	// Get TLS version from handshake to ensure compatibility
 	protocol := "tls1.3"  // Default to TLS 1.3, but we'll adapt based on server response
 	
 	// Try to detect the negotiated TLS version
-	targetInfo, err := p.getTargetInfo(sessionID, nil)
+	targetInfo, err := p.SessionManager.GetTargetInfo(sessionID, nil)
 	if err == nil && targetInfo.Version > 0 {
 		// Check for standard TLS version codes
 		detectedVersion := targetInfo.Version
@@ -1550,7 +1360,7 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 		defer wg.Done()
 		// Use a buffer large enough for TLS records but not so large we fragment across TCP packets
 		buffer := make([]byte, 16384) // 16KB is a common TLS record max size
-		relayData(clientConn, conn, buffer, "Client -> Target")
+		relay.RelayData(clientConn, conn, buffer, "Client -> Target")
 	}()
 
 	// Target -> Client with enhanced progress logging
@@ -1558,7 +1368,7 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 		defer wg.Done()
 		// Use a buffer large enough for TLS records but not so large we fragment across TCP packets
 		buffer := make([]byte, 16384) // 16KB is a common TLS record max size
-		relayData(conn, clientConn, buffer, "Target -> Client")
+		relay.RelayData(conn, clientConn, buffer, "Target -> Client")
 	}()
 
 	// Wait for both directions to complete
@@ -1582,12 +1392,10 @@ func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
 //
 // The extracted SNI is used both for establishing connections to the correct target
 // and for potential SNI concealment in the OOB handshake relay strategy.
+// Function replaced with tls.ExtractSNIFromClientHello
+/*
 func extractSNI(clientHello []byte) (string, error) {
-	if len(clientHello) < 43 { // Minimum length for a valid ClientHello
-		return "", errors.New("ClientHello too short")
-	}
-
-	// Ensure this is a TLS ClientHello by checking the first few bytes
+	// This function has been moved to pkg/tls package
 	if clientHello[0] != 0x16 { // TLS handshake type
 		return "", errors.New("Not a TLS handshake")
 	}
@@ -1671,6 +1479,7 @@ func extractSNI(clientHello []byte) (string, error) {
 
 	return "", errors.New("SNI not found in ClientHello")
 }
+*/
 
 // relayData implements an efficient bidirectional data relay with TLS inspection.
 //
@@ -1683,7 +1492,10 @@ func extractSNI(clientHello []byte) (string, error) {
 // By relaying data without attempting to modify TLS records, this approach
 // avoids the "decryption failed or bad record mac" errors that would occur
 // when modifying TLS handshake data or attempting to split/merge TLS records.
-func relayData(source, destination net.Conn, buffer []byte, label string) {
+// relayData was moved to pkg/relay/relay.go
+func relayData_UNUSED(source, destination net.Conn, buffer []byte, label string) {
+	// REMOVED: This function was moved to pkg/relay/relay.go
+	/*
 	var totalBytes int64
 
 	for {
@@ -1709,20 +1521,20 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 			if n >= 5 {
 				recordType := buffer[0]
 				// Only interpret as TLS record if it's a valid TLS record type (20-24)
-				if recordType >= 20 && recordType <= 24 {
+				if recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 					version := (uint16(buffer[1]) << 8) | uint16(buffer[2])
 					length := (uint16(buffer[3]) << 8) | uint16(buffer[4])
 					expectedLen := int(length) + 5 // record header (5 bytes) + payload length
 					
 					// Enhanced version logging with human-readable format
 					versionStr := "Unknown"
-					if version == 0x0303 {
+					if version == tls.VersionTLS12 {
 						versionStr = "TLS1.2"
-					} else if version == 0x0304 {
+					} else if version == tls.VersionTLS13 {
 						versionStr = "TLS1.3"
-					} else if version == 0x0301 {
+					} else if version == tls.VersionTLS10 {
 						versionStr = "TLS1.0"
-					} else if version == 0x0302 {
+					} else if version == tls.VersionTLS11 {
 						versionStr = "TLS1.1"
 					}
 
@@ -1782,7 +1594,7 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 						
 					// Special handling for TLS 1.3 records with 0x0303 version field
 					// This is normal in TLS 1.3, which uses 0x0303 in the record layer for compatibility
-					if version == 0x0303 {
+					if version == tls.VersionTLS12 {
 						log.Printf("ℹ️ %s: Note: TLS record with 0x0303 version field is normal in both TLS 1.2 and TLS 1.3", label)
 					}
 				} else {
@@ -1849,6 +1661,7 @@ func relayData(source, destination net.Conn, buffer []byte, label string) {
 	}
 
 	log.Printf("✅ %s: Relay complete, %d bytes transferred", label, totalBytes)
+	*/
 }
 
 // signalConnectionAdoption would signal to the OOB server that the client is taking over 
@@ -2009,7 +1822,7 @@ func (p *TLSProxy) establishPostHandshakeConnection(clientConn net.Conn, session
     log.Printf("🔹 Session %s: Attempting to establish direct connection for application data", sessionID)
     
     // Check TLS version to ensure compatibility
-    targetInfo, err := p.getTargetInfo(sessionID, nil)
+    targetInfo, err := p.SessionManager.GetTargetInfo(sessionID, nil)
     if err == nil && targetInfo.Version > 0 {
         // Determine TLS version
         isTLS13Compatible := targetInfo.Version == 0x0304 // TLS 1.3
@@ -2109,7 +1922,7 @@ func (p *TLSProxy) establishPostHandshakeConnection(clientConn net.Conn, session
                     errChan <- fmt.Errorf("recovered panic: %v", err)
                 }
             }()
-            relayData(clientConn, targetConn, buffer, fmt.Sprintf("Session %s: Client->Target", sessionID))
+            relay.RelayData(clientConn, targetConn, buffer, fmt.Sprintf("Session %s: Client->Target", sessionID))
         }()
     }()
     
@@ -2136,7 +1949,7 @@ func (p *TLSProxy) establishPostHandshakeConnection(clientConn net.Conn, session
                     errChan <- fmt.Errorf("recovered panic: %v", err)
                 }
             }()
-            relayData(targetConn, clientConn, buffer, fmt.Sprintf("Session %s: Target->Client", sessionID))
+            relay.RelayData(targetConn, clientConn, buffer, fmt.Sprintf("Session %s: Target->Client", sessionID))
         }()
     }()
     
@@ -2168,7 +1981,7 @@ func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (ne
 	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
 
 	// First, get target information from the OOB server
-	targetInfo, err := p.getTargetInfo(sessionID, nil)
+	targetInfo, err := p.SessionManager.GetTargetInfo(sessionID, nil)
 	if err != nil {
 		log.Printf("❌ Failed to get target information: %v", err)
 		return nil, err

@@ -70,8 +70,8 @@ func IsHandshakeComplete(data []byte) bool {
 	return false
 }
 
-// isSessionTicketMessage determines if a TLS message is a NewSessionTicket
-func isSessionTicketMessage(data []byte) bool {
+// IsSessionTicketMessage determines if a TLS message is a NewSessionTicket
+func IsSessionTicketMessage(data []byte) bool {
 	if len(data) < 6 {
 		return false
 	}
@@ -91,7 +91,7 @@ func analyzeTLSHandshakeStatus(message []byte) (isHandshake bool, isComplete boo
 		return false, false
 	}
 
-	recordType, _, _, _ := parseTLSRecordHeader(message)
+	recordType, _, _, _ := ParseTLSRecordHeader(message)
 	
 	// Check if this is a handshake record
 	isHandshake = (recordType == RecordTypeHandshake)
@@ -119,7 +119,7 @@ func logTLSRecord(data []byte, label string) {
 		return
 	}
 	
-	recordType, version, msgLen, _ := parseTLSRecordHeader(data)
+	recordType, version, msgLen, _ := ParseTLSRecordHeader(data)
 	
 	// Determine record type string
 	typeStr := "Unknown"
@@ -184,8 +184,8 @@ func logTLSRecord(data []byte, label string) {
 	}
 }
 
-// extractSNIFromClientHello extracts the Server Name Indication from a ClientHello message
-func extractSNIFromClientHello(clientHello []byte) (string, error) {
+// ExtractSNIFromClientHello extracts the Server Name Indication from a ClientHello message
+func ExtractSNIFromClientHello(clientHello []byte) (string, error) {
 	if len(clientHello) < 43 { // Minimum size for a ClientHello with extensions
 		return "", errors.New("client hello too short")
 	}

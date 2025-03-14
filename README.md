@@ -18,6 +18,83 @@ Sultry is built on three key principles:
 
 Sultry employs a dual-component architecture:
 
+## Codebase Organization
+
+The codebase is organized in a modular structure:
+
+```
+sultry/
+├── cmd/
+│   └── minimal/    # Minimal implementation using modular packages
+├── pkg/
+│   ├── client/     # Client-side proxy functionality
+│   ├── connection/ # Connection handling
+│   ├── handlers/   # HTTP API handlers
+│   ├── relay/      # Data relay functionality
+│   ├── server/     # Server-side proxy functionality
+│   ├── session/    # Session management
+│   └── tls/        # TLS protocol utilities
+├── client.go       # Original client implementation
+├── server.go       # Original server implementation
+└── main.go         # Entry point
+```
+
+Each package is responsible for a specific aspect of the proxy functionality:
+
+- **pkg/tls**: Handles TLS protocol operations like parsing headers, extracting SNI, and detecting handshake completion
+- **pkg/session**: Manages client and server sessions, including session tickets for TLS resumption
+- **pkg/relay**: Provides bidirectional data relay with TLS record inspection
+- **pkg/connection**: Handles different connection types (CONNECT tunnels, direct TLS)
+- **pkg/client**: Implements the client-side proxy
+- **pkg/server**: Implements the server-side proxy with HTTP API
+
+### Modular Approach
+
+The modular implementation offers several advantages:
+- **Smaller file sizes**: No file exceeds 300 lines, making the code much more maintainable
+- **Clear separation of concerns**: Each package has a specific responsibility
+- **Improved testability**: Components can be tested in isolation
+- **Better code reuse**: Common functionality is shared between client and server
+- **Easier extension**: New features can be added by extending specific packages
+
+## Usage
+
+There are two versions of Sultry available:
+
+### Original Version
+
+```bash
+# Build the original version
+make build
+
+# Run in client mode
+./sultry -mode client -local 127.0.0.1:8080 -remote your-server.com:9090
+
+# Run in server mode
+./sultry -mode server -local 0.0.0.0:9090
+
+# Run in dual mode (both client and server on same machine)
+./sultry -mode dual -local 127.0.0.1:8080
+```
+
+### Modular Version
+
+```bash
+# Build the modular version
+make build-minimal
+
+# Run in client mode
+./sultry-minimal -mode client -local 127.0.0.1:8080 -remote your-server.com:9090
+
+# Run in server mode
+./sultry-minimal -mode server -local 0.0.0.0:9090
+
+# Run in dual mode (both client and server on same machine)
+./sultry-minimal -mode dual -local 127.0.0.1:8080
+```
+
+To use Sultry, you'll need both a client and server component running. The client acts as a local proxy for your browser or applications, while the server component handles SNI resolution and relay.
+
 1. **Client Component** (`client.go`): Manages incoming client connections, handles HTTP requests, HTTPS tunneling, and relays TLS data using direct connections to targets.
 2. **Server Component** (`server.go`): Only processes SNI information, establishes target connections, and coordinates with the client component.
 
@@ -96,25 +173,45 @@ This architecture makes Sultry significantly harder to detect and block compared
 
 ## Quick Start
 
-The easiest way to get started is to use the included setup script:
+The easiest way to get started is to use the included Makefile:
 
 ```bash
-./setup.sh
-```
+# Build both the original and modular versions
+make build
 
-This will build Sultry and set up the necessary configuration for testing.
+# Build just the original version
+make build-original
+
+# Build just the modular version
+make build-modular
+```
 
 ### Running Modes
 
+#### Original Version
+
 ```bash
 # Client mode - handles client connections and OOB SNI resolution
-./sultry --mode client
+./bin/sultry -mode client -local 127.0.0.1:8080 -remote your-server.com:9090
 
 # Server mode - provides SNI resolution services
-./sultry --mode server
+./bin/sultry -mode server -local 0.0.0.0:9090
 
 # Dual mode - runs both client and server components on the same machine
-./sultry --mode dual
+./bin/sultry -mode dual -local 127.0.0.1:8080
+```
+
+#### Modular Version
+
+```bash
+# Client mode
+./bin/sultry-mod -mode client -local 127.0.0.1:8080 -remote your-server.com:9090
+
+# Server mode
+./bin/sultry-mod -mode server -local 0.0.0.0:9090
+
+# Dual mode
+./bin/sultry-mod -mode dual -local 127.0.0.1:8080
 ```
 
 For typical deployments, you would run the server component on a machine outside the censored network and the client component on the local machine.
@@ -190,16 +287,21 @@ The project is currently organized with a few large files:
 - `oob.go`: Out-of-Band communication module
 - `main.go`: Entry point
 
-#### Modular Structure (Future Implementation)
+#### Modular Structure (Implemented)
 
-A modular code structure has been designed to improve maintainability. See the `modular` directory for details and migration strategy. The proposed structure breaks down the large files into:
+A modular code structure has been implemented to improve maintainability. The large monolithic files have been broken down into focused packages:
 
-- `relay.go`: Functions for relaying data between connections
-- `handlers.go`: HTTP handler functions for the server component
-- `tunnel.go`: Functions for establishing direct connections after handshake
-- `tls.go`: TLS protocol utilities and constants
+- `pkg/tls/tls.go`: TLS protocol utilities and constants for parsing records, extracting SNI, etc.
+- `pkg/relay/relay.go`: Functions for relaying data between connections with TLS awareness
+- `pkg/relay/tunnel.go`: Functions for establishing direct connections after handshake
+- `pkg/session/manager.go`: Server-side session state management
+- `pkg/session/session.go`: Session ticket handling for TLS resumption
+- `pkg/session/client_session.go`: Client-side session operations 
+- `pkg/connection/connection.go`: Connection handling for different protocols (HTTP CONNECT, direct TLS)
+- `pkg/client/client.go`: Client-side proxy implementation with multiple connection strategies
+- `pkg/server/server.go`: Server-side proxy and HTTP API implementation
 
-This modular approach will make the codebase easier to understand, maintain, and extend.
+This modular approach makes the codebase easier to understand, maintain, and extend. No file exceeds 300 lines, providing better code organization and separation of concerns.
 
 ### Concealment Approaches
 

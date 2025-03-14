@@ -1,20 +1,11 @@
 # Refactoring Roadmap for Sultry
 
-This document outlines the plan for refactoring the Sultry codebase to improve maintainability, reduce file sizes, and enhance modularity.
-
 ## Current State
 
-The codebase currently has two large files that handle most of the functionality:
+The codebase still has two large files that handle most of the functionality:
 
-- **client.go**: 2318 lines
+- **client.go**: 2131 lines (reduced from 2318 lines)
 - **server.go**: 1761 lines
-
-These files contain mixed responsibilities including:
-- TLS protocol handling
-- Connection management
-- HTTP handling
-- Data relay
-- Session management
 
 ## Refactoring Goals
 
@@ -24,83 +15,61 @@ These files contain mixed responsibilities including:
 4. Maintain full compatibility with existing behavior
 5. Make testing easier
 
-## Modular Structure
+## Modular Structure Progress
 
-We've started the refactoring process by creating modular packages in the `pkg/` directory:
+We've made significant progress in implementing the modular structure in the `pkg/` directory:
 
 ```
 pkg/
-├── tls/         # TLS protocol handling
-├── relay/       # Connection relay functionality
-├── session/     # Session management
-└── handlers/    # HTTP handlers
+├── tls/         # TLS protocol handling - IMPLEMENTED
+├── relay/       # Connection relay functionality - IMPLEMENTED
+├── session/     # Session management - IMPLEMENTED
+└── handlers/    # HTTP handlers - PARTIALLY IMPLEMENTED
 ```
 
-## Step-by-Step Refactoring Plan
+### Phase 1 Progress: Function Extraction
 
-### Phase 1: Function Extraction
+✅ Completed:
+- TLS utility functions have been moved to pkg/tls
+- Session ticket management has been moved to pkg/session 
+- Relay functionality has been moved to pkg/relay
 
-1. Identify functions with minimal dependencies
-2. Move them to appropriate packages
-3. Update function signatures to be exported
-4. Fix any internal references
-5. Test each change incrementally
+🚧 In Progress:
+- Many functions still remain in client.go and server.go
 
-### Phase 2: Interface Definition
+### Phase 2 TODO: Interface Definition
 
-1. Define clear interfaces between packages
-2. Create facade pattern for backward compatibility
-3. Update client.go and server.go to use the new interfaces
+- Define clear interfaces between packages
+- Create facade pattern for backward compatibility
+- Update client.go and server.go to use the new interfaces
 
-### Phase 3: State Management
+### Phase 3 TODO: State Management
 
-1. Refactor global state (e.g., sessions)
-2. Implement context-based state management
-3. Reduce usage of global variables
+- Refactor global state (e.g., sessions)
+- Implement context-based state management
+- Reduce usage of global variables
 
-### Phase 4: Dependency Injection
+### Phase 4 TODO: Dependency Injection
 
-1. Refactor constructor functions
-2. Implement dependency injection
-3. Make testing easier with mock dependencies
+- Refactor constructor functions
+- Implement dependency injection
+- Make testing easier with mock dependencies
 
-## Detailed Function Mapping
+## Next Steps
 
-### From client.go to pkg/tls/
+The next step is to focus on extracting the core connection handling logic from client.go and server.go. This includes:
 
-| Original Function        | New Function             | Line Numbers |
-|--------------------------|--------------------------|--------------|
-| isHandshakeComplete      | tls.IsHandshakeComplete | 40-65        |
-| isSessionTicketMessage   | tls.IsSessionTicketMessage | 66-79     |
-| parseTLSRecordHeader     | tls.ParseTLSRecordHeader | 30-41      |
-| logTLSRecord             | tls.LogTLSRecord        | 108-177      |
-| extractSNI               | tls.ExtractSNIFromClientHello | 1038-1138 |
+1. Create a pkg/connection package for connection-related functionality
+2. Move handleProxyConnection from client.go to pkg/connection
+3. Move handleHTTPConnection from client.go to pkg/connection
+4. Move handleTunnelRequest from client.go to pkg/connection
 
-### From client.go to pkg/relay/
+For server.go, we need to:
 
-| Original Function        | New Function             | Line Numbers |
-|--------------------------|--------------------------|--------------|
-| relayData                | relay.RelayData         | 1686-1750    |
-| establishDirectConnectionAfterHandshake | relay.EstablishDirectConnection | 2053-2095 |
-| signalHandshakeCompletion | relay.SignalHandshakeCompletion | 1260-1301 |
-| getTargetInfo            | relay.GetTargetInfo     | 1194-1240    |
-| releaseOOBConnection     | relay.ReleaseConnection | 1243-1268    |
+1. Extract the HTTP handlers to pkg/handlers
+2. Move server connection functionality to pkg/connection
 
-### From server.go to pkg/session/
-
-| Original Function        | New Function             | Line Numbers |
-|--------------------------|--------------------------|--------------|
-| SessionState struct      | session.SessionState     | 35-45        |
-| cleanupInactiveSessions  | session.CleanupInactiveSessions | 460-484 |
-
-### From server.go to pkg/handlers/
-
-| Original Function        | New Function             | Line Numbers |
-|--------------------------|--------------------------|--------------|
-| handleCompleteHandshake  | handlers.HandleCompleteHandshake | 580-621 |
-| handleGetTargetInfo      | handlers.HandleGetTargetInfo | 1129-1203 |
-| handleReleaseConnection  | handlers.HandleReleaseConnection | 1464-1488 |
-| handleGetResponse        | handlers.HandleGetResponse | 1505-1554 |
+After this, we will focus on refactoring the main client and server structures to use the new modular packages.
 
 ## Refactoring Challenges
 
@@ -115,10 +84,3 @@ pkg/
 2. Test each refactored component independently
 3. Integration test after each refactoring phase
 4. Verify behavior matches original implementation
-
-## Future Considerations
-
-1. **API Stability**: Ensure the refactored code maintains a stable API
-2. **Documentation**: Update documentation to reflect the new structure
-3. **Performance**: Benchmark before and after to ensure performance is maintained
-4. **Extensibility**: Design the new structure to be more extensible

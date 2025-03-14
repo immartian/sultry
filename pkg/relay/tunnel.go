@@ -10,15 +10,29 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	
+	"sultry/pkg/session"
 )
 
-// establishDirectConnectionAfterHandshake creates a direct connection to the target server
+// TunnelManager handles tunneling and direct connection establishment
+type TunnelManager struct {
+	SessionManager *session.SessionManager
+}
+
+// NewTunnelManager creates a new tunnel manager
+func NewTunnelManager(sessionManager *session.SessionManager) *TunnelManager {
+	return &TunnelManager{
+		SessionManager: sessionManager,
+	}
+}
+
+// EstablishDirectConnectionAfterHandshake creates a direct connection to the target server
 // after the handshake is complete
-func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
+func (tm *TunnelManager) EstablishDirectConnectionAfterHandshake(sessionID string) (net.Conn, error) {
 	log.Printf("🔹 Establishing direct connection for session %s", sessionID)
 
 	// First, get target information from the OOB server
-	targetInfo, err := p.getTargetInfo(sessionID, nil)
+	targetInfo, err := tm.SessionManager.GetTargetInfo(sessionID, nil)
 	if err != nil {
 		log.Printf("❌ Failed to get target information: %v", err)
 		return nil, err
@@ -53,14 +67,14 @@ func (p *TLSProxy) establishDirectConnectionAfterHandshake(sessionID string) (ne
 	return conn, nil
 }
 
-// signalHandshakeCompletion sends a message to the OOB server to signal that the handshake is complete
-func (p *TLSProxy) signalHandshakeCompletion(sessionID string) error {
+// SignalHandshakeCompletion sends a message to the OOB server to signal that the handshake is complete
+func (tm *TunnelManager) SignalHandshakeCompletion(sessionID string) error {
 	reqBody := fmt.Sprintf(`{"session_id":"%s","action":"complete_handshake"}`, sessionID)
 
 	// Use a client with short timeout to avoid hanging
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Post(
-		fmt.Sprintf("http://%s/complete_handshake", p.OOB.GetServerAddress()),
+		fmt.Sprintf("http://%s/complete_handshake", tm.SessionManager.OOB.GetServerAddress()),
 		"application/json",
 		strings.NewReader(reqBody),
 	)
@@ -80,8 +94,8 @@ func (p *TLSProxy) signalHandshakeCompletion(sessionID string) error {
 	return nil
 }
 
-// getTargetInfo retrieves information about the target server from the OOB server
-func (p *TLSProxy) getTargetInfo(sessionID string, clientHelloData []byte) (*TargetInfo, error) {
+// GetTargetInfo retrieves information about the target server from the OOB server
+func (tm *TunnelManager) GetTargetInfo(sessionID string, clientHelloData []byte) (*session.TargetInfo, error) {
 	// Prepare request with both session ID and ClientHello data
 	requestData := struct {
 		SessionID   string `json:"session_id"`
@@ -101,7 +115,7 @@ func (p *TLSProxy) getTargetInfo(sessionID string, clientHelloData []byte) (*Tar
 	// Send request to OOB server with timeout
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(
-		fmt.Sprintf("http://%s/get_target_info", p.OOB.GetServerAddress()),
+		fmt.Sprintf("http://%s/get_target_info", tm.SessionManager.OOB.GetServerAddress()),
 		"application/json",
 		bytes.NewReader(requestBytes),
 	)
@@ -116,7 +130,7 @@ func (p *TLSProxy) getTargetInfo(sessionID string, clientHelloData []byte) (*Tar
 	}
 
 	// Parse response
-	var targetInfo TargetInfo
+	var targetInfo session.TargetInfo
 	if err := json.NewDecoder(resp.Body).Decode(&targetInfo); err != nil {
 		return nil, fmt.Errorf("failed to decode target info: %w", err)
 	}
@@ -129,14 +143,14 @@ func (p *TLSProxy) getTargetInfo(sessionID string, clientHelloData []byte) (*Tar
 	return &targetInfo, nil
 }
 
-// releaseOOBConnection sends a request to the OOB server to release the connection
-func (p *TLSProxy) releaseOOBConnection(sessionID string) error {
+// ReleaseConnection sends a request to the OOB server to release the connection
+func (tm *TunnelManager) ReleaseConnection(sessionID string) error {
 	reqBody := fmt.Sprintf(`{"session_id":"%s","action":"release_connection"}`, sessionID)
 
 	// Use a client with short timeout to avoid hanging
 	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Post(
-		fmt.Sprintf("http://%s/release_connection", p.OOB.GetServerAddress()),
+		fmt.Sprintf("http://%s/release_connection", tm.SessionManager.OOB.GetServerAddress()),
 		"application/json",
 		strings.NewReader(reqBody),
 	)
@@ -157,12 +171,12 @@ func (p *TLSProxy) releaseOOBConnection(sessionID string) error {
 	return nil
 }
 
-// fallbackToRelayMode handles fallback when direct connection fails
-func (p *TLSProxy) fallbackToRelayMode(clientConn net.Conn, sessionID string) {
+// FallbackToRelayMode handles fallback when direct connection fails
+func (tm *TunnelManager) FallbackToRelayMode(clientConn net.Conn, sessionID string) {
 	log.Printf("🔹 Establishing relay connection for session %s", sessionID)
 
 	// Create a connection to the OOB server
-	serverAddr := p.OOB.GetServerAddress()
+	serverAddr := tm.SessionManager.OOB.GetServerAddress()
 	log.Printf("🔹 Connecting to relay server at %s", serverAddr)
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
