@@ -101,6 +101,7 @@ The following optimizations have been implemented:
 4. ✅ **Implement proper TLS utilities module** in pkg/tls
 5. ✅ **Create smaller, focused implementations** of client and server components
 6. ✅ **Eliminate HTTP API overhead** with direct OOB communication option
+7. ✅ **Automatic port management** to prevent conflicts between TCP and HTTP servers
 
 ## Implementation Practices
 

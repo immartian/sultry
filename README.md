@@ -193,13 +193,19 @@ make build
 
 ### Optimized Local Mode
 
-For local operations, you can use the `-direct-oob` flag to bypass the HTTP API layer:
+For local operations, you can use the `-direct-oob` flag to bypass the HTTP API layer or run in `dual` mode to have both client and server in the same process:
 
 ```bash
+# Direct OOB mode (client)
 ./bin/sultry -mode client -direct-oob -local 127.0.0.1:8080
+
+# Dual mode (client and server in one process)
+./bin/sultry -mode dual -local 127.0.0.1:8080
 ```
 
-This mode creates a direct connection between components, eliminating the HTTP API overhead. It's significantly more efficient for local operations.
+These modes create a direct connection between components, eliminating the HTTP API overhead. They're significantly more efficient for local operations and testing.
+
+> **Note:** The HTTP API port is automatically calculated as `[server port]+1` to avoid conflicts. For example, if the server is on port 9008, the API will be on port 9009.
 
 For typical deployments, you would run the server component on a machine outside the censored network and the client component on the local machine.
 
