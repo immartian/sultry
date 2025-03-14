@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/hex"
-	"testing"
 	"sultry/pkg/tls"
+	"testing"
 )
 
 func TestIsHandshakeComplete(t *testing.T) {
@@ -104,12 +104,12 @@ func TestIsSessionTicketMessage(t *testing.T) {
 
 func TestParseTLSRecordHeader(t *testing.T) {
 	tests := []struct {
-		name         string
-		hexData      string
-		wantType     byte
-		wantVersion  uint16
-		wantLength   uint16
-		wantError    bool
+		name        string
+		hexData     string
+		wantType    byte
+		wantVersion uint16
+		wantLength  uint16
+		wantError   bool
 	}{
 		{
 			name:        "Empty data",
@@ -145,12 +145,12 @@ func TestParseTLSRecordHeader(t *testing.T) {
 			}
 
 			gotType, gotVersion, gotLength, err := tls.ParseTLSRecordHeader(data)
-			
+
 			if (err != nil) != tt.wantError {
 				t.Errorf("tls.ParseTLSRecordHeader() error = %v, wantError %v", err, tt.wantError)
 				return
 			}
-			
+
 			if !tt.wantError {
 				if gotType != tt.wantType {
 					t.Errorf("tls.ParseTLSRecordHeader() type = %v, want %v", gotType, tt.wantType)

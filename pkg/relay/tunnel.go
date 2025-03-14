@@ -5,7 +5,7 @@ import (
 	"log"
 	"net"
 	"time"
-	
+
 	"sultry/pkg/session"
 )
 
@@ -46,7 +46,7 @@ func (tm *TunnelManager) EstablishDirectConnectionAfterHandshake(sessionID strin
 		log.Printf("❌ Failed to connect to target: %v", err)
 		return nil, err
 	}
-	
+
 	log.Printf("✅ Direct connection established to %s", targetAddr)
 
 	// Optimize connection

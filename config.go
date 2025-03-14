@@ -14,18 +14,18 @@ type OOBChannelConfig struct {
 
 // Config represents the application configuration
 type Config struct {
-	Mode                      string             `json:"mode,omitempty"`
-	LocalProxyAddr            string             `json:"local_proxy_addr"`
-	RemoteProxyAddr           string             `json:"remote_proxy_addr,omitempty"`
-	RelayPort                 int                `json:"relay_port,omitempty"`
-	CoverSNI                  string             `json:"cover_sni,omitempty"`
-	PrioritizeSNI             bool               `json:"prioritize_sni_concealment"`
-	OOBChannels               interface{}        `json:"oob_channels,omitempty"` // Can be int or []OOBChannelConfig
-	FullClientHelloConcealment bool               `json:"full_clienthello_concealment"`
-	HandshakeTimeout          int                `json:"handshake_timeout,omitempty"`
-	ConnectionPoolSize        int                `json:"connection_pool_size,omitempty"`
-	EnforceTLS13              bool               `json:"enforce_tls13,omitempty"`
-	UseOOBForApplicationData  bool               `json:"use_oob_for_application_data,omitempty"`
+	Mode                       string      `json:"mode,omitempty"`
+	LocalProxyAddr             string      `json:"local_proxy_addr"`
+	RemoteProxyAddr            string      `json:"remote_proxy_addr,omitempty"`
+	RelayPort                  int         `json:"relay_port,omitempty"`
+	CoverSNI                   string      `json:"cover_sni,omitempty"`
+	PrioritizeSNI              bool        `json:"prioritize_sni_concealment"`
+	OOBChannels                interface{} `json:"oob_channels,omitempty"` // Can be int or []OOBChannelConfig
+	FullClientHelloConcealment bool        `json:"full_clienthello_concealment"`
+	HandshakeTimeout           int         `json:"handshake_timeout,omitempty"`
+	ConnectionPoolSize         int         `json:"connection_pool_size,omitempty"`
+	EnforceTLS13               bool        `json:"enforce_tls13,omitempty"`
+	UseOOBForApplicationData   bool        `json:"use_oob_for_application_data,omitempty"`
 }
 
 // GetOOBChannelsCount returns the number of OOB channels
@@ -56,7 +56,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
-	
+
 	// Set defaults for any missing values
 	if config.Mode == "" {
 		config.Mode = "client"

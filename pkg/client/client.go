@@ -22,16 +22,16 @@ type ClientProxy struct {
 // NewClientProxy creates a new client proxy
 func NewClientProxy(sessionManager *session.SessionManager, tunnelManager *relay.TunnelManager, options ...Option) *ClientProxy {
 	cp := &ClientProxy{
-		SessionManager: sessionManager,
-		TunnelManager:  tunnelManager,
+		SessionManager:   sessionManager,
+		TunnelManager:    tunnelManager,
 		HandshakeTimeout: 10000, // Default timeout: 10 seconds
 	}
-	
+
 	// Apply options
 	for _, opt := range options {
 		opt(cp)
 	}
-	
+
 	return cp
 }
 
@@ -70,16 +70,16 @@ func WithHandshakeTimeout(timeout int) Option {
 func (cp *ClientProxy) Start(localAddr string) error {
 	// Log configuration
 	cp.logConfig()
-	
+
 	// Create listener
 	listener, err := net.Listen("tcp", localAddr)
 	if err != nil {
 		return fmt.Errorf("failed to start client proxy: %w", err)
 	}
 	defer listener.Close()
-	
+
 	log.Printf("🔒 Sultry client proxy listening on %s", localAddr)
-	
+
 	// Accept connections
 	for {
 		conn, err := listener.Accept()
@@ -87,7 +87,7 @@ func (cp *ClientProxy) Start(localAddr string) error {
 			log.Printf("❌ Connection error: %v", err)
 			continue
 		}
-		
+
 		go cp.handleConnection(conn)
 	}
 }
@@ -109,9 +109,9 @@ func (cp *ClientProxy) logConfig() {
 // handleConnection processes incoming connections and routes them to appropriate handlers
 func (cp *ClientProxy) handleConnection(conn net.Conn) {
 	defer conn.Close()
-	
+
 	log.Printf("🔹 Received connection from %s", conn.RemoteAddr())
-	
+
 	// Create connection handler with our options
 	connHandler := connection.NewConnectionHandler(
 		cp.SessionManager,
@@ -123,7 +123,7 @@ func (cp *ClientProxy) handleConnection(conn net.Conn) {
 			HandshakeTimeout:           cp.HandshakeTimeout,
 		},
 	)
-	
+
 	// Handle the connection using our modular connection handler
 	connHandler.HandleConnection(conn)
 }

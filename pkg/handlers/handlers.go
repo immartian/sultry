@@ -37,10 +37,10 @@ func HandleCompleteHandshake(w http.ResponseWriter, r *http.Request, manager *se
 	// Close connection after a brief delay to ensure all buffered data is sent
 	go func() {
 		time.Sleep(500 * time.Millisecond) // Ensure state sync before dropping connection
-		
+
 		// Remove the session to free up resources
 		manager.RemoveSession(req.SessionID)
-		
+
 		log.Printf("🔹 Proxy connection closed for session %s", req.SessionID)
 	}()
 
@@ -216,10 +216,10 @@ func HandleGetResponse(w http.ResponseWriter, r *http.Request, manager *session.
 
 	// Construct response
 	resp := struct {
-		Data             []byte `json:"data"`
+		Data              []byte `json:"data"`
 		HandshakeComplete bool   `json:"handshake_complete"`
 	}{
-		Data:             response,
+		Data:              response,
 		HandshakeComplete: handshakeComplete,
 	}
 

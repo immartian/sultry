@@ -14,15 +14,15 @@ func BuildInfo() string {
 const (
 	// TLS Record Types
 	RecordTypeChangeCipherSpec = tls.RecordTypeChangeCipherSpec
-	RecordTypeAlert           = tls.RecordTypeAlert
-	RecordTypeHandshake       = tls.RecordTypeHandshake
-	RecordTypeApplicationData = tls.RecordTypeApplicationData 
-	RecordTypeHeartbeat       = tls.RecordTypeHeartbeat
-	
+	RecordTypeAlert            = tls.RecordTypeAlert
+	RecordTypeHandshake        = tls.RecordTypeHandshake
+	RecordTypeApplicationData  = tls.RecordTypeApplicationData
+	RecordTypeHeartbeat        = tls.RecordTypeHeartbeat
+
 	// TLS Handshake Types
-	HandshakeTypeClientHello = tls.HandshakeTypeClientHello
-	HandshakeTypeServerHello = tls.HandshakeTypeServerHello
-	HandshakeTypeCertificate = tls.HandshakeTypeCertificate
-	HandshakeTypeFinished    = tls.HandshakeTypeFinished
+	HandshakeTypeClientHello      = tls.HandshakeTypeClientHello
+	HandshakeTypeServerHello      = tls.HandshakeTypeServerHello
+	HandshakeTypeCertificate      = tls.HandshakeTypeCertificate
+	HandshakeTypeFinished         = tls.HandshakeTypeFinished
 	HandshakeTypeNewSessionTicket = tls.HandshakeTypeNewSessionTicket
 )

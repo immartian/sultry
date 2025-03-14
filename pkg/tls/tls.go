@@ -10,23 +10,23 @@ import (
 // TLS Record Types constants
 const (
 	RecordTypeChangeCipherSpec = 20
-	RecordTypeAlert           = 21
-	RecordTypeHandshake       = 22
-	RecordTypeApplicationData = 23
-	RecordTypeHeartbeat       = 24
+	RecordTypeAlert            = 21
+	RecordTypeHandshake        = 22
+	RecordTypeApplicationData  = 23
+	RecordTypeHeartbeat        = 24
 )
 
 // TLS Handshake Types constants
 const (
-	HandshakeTypeClientHello         = 1
-	HandshakeTypeServerHello         = 2
-	HandshakeTypeCertificate         = 11
-	HandshakeTypeServerKeyExchange   = 12
-	HandshakeTypeCertificateRequest  = 13
-	HandshakeTypeServerHelloDone     = 14
-	HandshakeTypeClientKeyExchange   = 16
-	HandshakeTypeFinished            = 20
-	HandshakeTypeNewSessionTicket    = 4
+	HandshakeTypeClientHello        = 1
+	HandshakeTypeServerHello        = 2
+	HandshakeTypeCertificate        = 11
+	HandshakeTypeServerKeyExchange  = 12
+	HandshakeTypeCertificateRequest = 13
+	HandshakeTypeServerHelloDone    = 14
+	HandshakeTypeClientKeyExchange  = 16
+	HandshakeTypeFinished           = 20
+	HandshakeTypeNewSessionTicket   = 4
 )
 
 // TLS Version constants
@@ -56,17 +56,17 @@ func IsHandshakeComplete(data []byte) bool {
 	if len(data) < 5 {
 		return false
 	}
-	
+
 	recordType := data[0]
 	if recordType == RecordTypeApplicationData {
 		return true
 	}
-	
+
 	// Check for Finished message in TLS
 	if recordType == RecordTypeHandshake && len(data) > 6 && data[5] == HandshakeTypeFinished {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -75,12 +75,12 @@ func IsSessionTicketMessage(data []byte) bool {
 	if len(data) < 6 {
 		return false
 	}
-	
+
 	// Check if it's a handshake record
 	if data[0] != RecordTypeHandshake {
 		return false
 	}
-	
+
 	// Check if it's a NewSessionTicket message (type 4)
 	return data[5] == HandshakeTypeNewSessionTicket
 }
@@ -92,15 +92,15 @@ func analyzeTLSHandshakeStatus(message []byte) (isHandshake bool, isComplete boo
 	}
 
 	recordType, _, _, _ := ParseTLSRecordHeader(message)
-	
+
 	// Check if this is a handshake record
 	isHandshake = (recordType == RecordTypeHandshake)
-	
+
 	// Application data means handshake is complete
 	if recordType == RecordTypeApplicationData {
 		return false, true
 	}
-	
+
 	// Check for Finished message in handshake
 	if isHandshake && len(message) > 5 {
 		handshakeType := message[5]
@@ -108,7 +108,7 @@ func analyzeTLSHandshakeStatus(message []byte) (isHandshake bool, isComplete boo
 			return true, true
 		}
 	}
-	
+
 	return isHandshake, false
 }
 
@@ -118,9 +118,9 @@ func logTLSRecord(data []byte, label string) {
 		log.Printf("⚠️ %s: Data too short to be a TLS record (%d bytes)", label, len(data))
 		return
 	}
-	
+
 	recordType, version, msgLen, _ := ParseTLSRecordHeader(data)
-	
+
 	// Determine record type string
 	typeStr := "Unknown"
 	switch recordType {
@@ -135,7 +135,7 @@ func logTLSRecord(data []byte, label string) {
 	case RecordTypeHeartbeat:
 		typeStr = "Heartbeat"
 	}
-	
+
 	// Determine TLS version string
 	versionStr := "Unknown"
 	switch version {
@@ -150,15 +150,15 @@ func logTLSRecord(data []byte, label string) {
 	default:
 		versionStr = "Unknown"
 	}
-	
-	log.Printf("🔹 %s: TLS Record [Type=%s (%d), Version=%s (0x%04x), Length=%d]", 
+
+	log.Printf("🔹 %s: TLS Record [Type=%s (%d), Version=%s (0x%04x), Length=%d]",
 		label, typeStr, recordType, versionStr, version, msgLen)
-	
+
 	// For handshake messages, try to determine the handshake type
 	if recordType == RecordTypeHandshake && len(data) >= 6 {
 		handshakeType := data[5]
 		typeStr := "Unknown"
-		
+
 		switch handshakeType {
 		case HandshakeTypeClientHello:
 			typeStr = "ClientHello"
@@ -179,7 +179,7 @@ func logTLSRecord(data []byte, label string) {
 		case HandshakeTypeNewSessionTicket:
 			typeStr = "NewSessionTicket"
 		}
-		
+
 		log.Printf("🔹 %s: Handshake Message [Type=%s (%d)]", label, typeStr, handshakeType)
 	}
 }

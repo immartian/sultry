@@ -11,18 +11,18 @@ import (
 
 // SessionState represents the state of a TLS session
 type SessionState struct {
-	TargetConn        net.Conn     // Connection to target server
-	ClientMessages    [][]byte     // Client messages in sequence
-	ServerResponses   [][]byte     // Server responses in sequence
-	HandshakeComplete bool         // Whether handshake is complete
-	LastActivity      time.Time    // Last activity time for timeout
-	ConnectedAt       time.Time    // When the connection was established
-	SNI               string       // Server Name Indication
-	SessionTicket     []byte       // TLS session ticket for resumption
-	ResponseQueue     chan []byte  // Channel for response queue
-	Adopted           bool         // Whether the connection has been adopted
-	ServerMsgIndex    int          // Index into ServerResponses for direct access
-	Mu                sync.Mutex   // Protects all fields in this struct
+	TargetConn        net.Conn    // Connection to target server
+	ClientMessages    [][]byte    // Client messages in sequence
+	ServerResponses   [][]byte    // Server responses in sequence
+	HandshakeComplete bool        // Whether handshake is complete
+	LastActivity      time.Time   // Last activity time for timeout
+	ConnectedAt       time.Time   // When the connection was established
+	SNI               string      // Server Name Indication
+	SessionTicket     []byte      // TLS session ticket for resumption
+	ResponseQueue     chan []byte // Channel for response queue
+	Adopted           bool        // Whether the connection has been adopted
+	ServerMsgIndex    int         // Index into ServerResponses for direct access
+	Mu                sync.Mutex  // Protects all fields in this struct
 }
 
 // Manager handles session management
@@ -42,7 +42,7 @@ func NewManager() *Manager {
 func (m *Manager) CreateSession(sessionID, sni string) *SessionState {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	session := &SessionState{
 		ClientMessages:    make([][]byte, 0),
 		ServerResponses:   make([][]byte, 0),
@@ -52,7 +52,7 @@ func (m *Manager) CreateSession(sessionID, sni string) *SessionState {
 		SNI:               sni,
 		ResponseQueue:     make(chan []byte, 10),
 	}
-	
+
 	m.sessions[sessionID] = session
 	return session
 }
@@ -61,7 +61,7 @@ func (m *Manager) CreateSession(sessionID, sni string) *SessionState {
 func (m *Manager) GetSession(sessionID string) *SessionState {
 	m.sessionsMu.RLock()
 	defer m.sessionsMu.RUnlock()
-	
+
 	return m.sessions[sessionID]
 }
 
@@ -69,12 +69,12 @@ func (m *Manager) GetSession(sessionID string) *SessionState {
 func (m *Manager) StoreClientMessage(sessionID string, message []byte) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	if session, exists := m.sessions[sessionID]; exists {
 		// Make a copy of the message
 		msgCopy := make([]byte, len(message))
 		copy(msgCopy, message)
-		
+
 		session.ClientMessages = append(session.ClientMessages, msgCopy)
 		session.LastActivity = time.Now()
 	}
@@ -84,12 +84,12 @@ func (m *Manager) StoreClientMessage(sessionID string, message []byte) {
 func (m *Manager) StoreServerResponse(sessionID string, response []byte) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	if session, exists := m.sessions[sessionID]; exists {
 		// Make a copy of the response
 		respCopy := make([]byte, len(response))
 		copy(respCopy, response)
-		
+
 		session.ServerResponses = append(session.ServerResponses, respCopy)
 		session.LastActivity = time.Now()
 	}
@@ -99,7 +99,7 @@ func (m *Manager) StoreServerResponse(sessionID string, response []byte) {
 func (m *Manager) SetTargetConn(sessionID string, conn net.Conn) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	if session, exists := m.sessions[sessionID]; exists {
 		session.TargetConn = conn
 		session.LastActivity = time.Now()
@@ -110,7 +110,7 @@ func (m *Manager) SetTargetConn(sessionID string, conn net.Conn) {
 func (m *Manager) MarkHandshakeComplete(sessionID string) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	if session, exists := m.sessions[sessionID]; exists {
 		session.HandshakeComplete = true
 		session.LastActivity = time.Now()
@@ -121,12 +121,12 @@ func (m *Manager) MarkHandshakeComplete(sessionID string) {
 func (m *Manager) RemoveSession(sessionID string) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	if session, exists := m.sessions[sessionID]; exists {
 		if session.TargetConn != nil {
 			session.TargetConn.Close()
 		}
-		
+
 		delete(m.sessions, sessionID)
 	}
 }
@@ -134,7 +134,7 @@ func (m *Manager) RemoveSession(sessionID string) {
 // StartCleanup starts periodic session cleanup
 func (m *Manager) StartCleanup(interval time.Duration) {
 	ticker := time.NewTicker(interval)
-	
+
 	for range ticker.C {
 		m.Cleanup()
 	}
@@ -144,25 +144,25 @@ func (m *Manager) StartCleanup(interval time.Duration) {
 func (m *Manager) Cleanup() {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
-	
+
 	cutoffTime := time.Now().Add(-5 * time.Minute)
 	var sessionsToRemove []string
-	
+
 	for id, session := range m.sessions {
 		if session.LastActivity.Before(cutoffTime) {
 			sessionsToRemove = append(sessionsToRemove, id)
 		}
 	}
-	
+
 	for _, id := range sessionsToRemove {
 		session := m.sessions[id]
 		if session.TargetConn != nil {
 			session.TargetConn.Close()
 		}
-		
+
 		delete(m.sessions, id)
 	}
-	
+
 	if len(sessionsToRemove) > 0 {
 		log.Printf("🧹 Cleaned up %d inactive sessions", len(sessionsToRemove))
 	}

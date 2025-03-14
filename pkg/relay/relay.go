@@ -6,7 +6,7 @@ import (
 	"net"
 	"strings"
 	"time"
-	
+
 	"sultry/pkg/tls"
 )
 
@@ -41,7 +41,7 @@ func RelayData(source, destination net.Conn, buffer []byte, label string) {
 					version := (uint16(buffer[1]) << 8) | uint16(buffer[2])
 					length := (uint16(buffer[3]) << 8) | uint16(buffer[4])
 					expectedLen := int(length) + 5 // record header (5 bytes) + payload length
-					
+
 					// Enhanced version logging with human-readable format
 					versionStr := "Unknown"
 					if version == tls.VersionTLS12 {
@@ -54,22 +54,22 @@ func RelayData(source, destination net.Conn, buffer []byte, label string) {
 						versionStr = "TLS1.1"
 					}
 
-					// CRITICAL: Verify we have a complete TLS record 
+					// CRITICAL: Verify we have a complete TLS record
 					// TLS requires exact record boundaries for MAC verification
 					if n < expectedLen {
-						log.Printf("⚠️ %s: Incomplete TLS record: got %d bytes, expected %d", 
+						log.Printf("⚠️ %s: Incomplete TLS record: got %d bytes, expected %d",
 							label, n, expectedLen)
-						
+
 						// For TLS, incomplete records will cause MAC failures
 						// but they are commonly seen with large certificates
 						if recordType == tls.RecordTypeHandshake {
 							log.Printf("ℹ️ %s: Handshake record may be split across multiple TCP segments (normal)", label)
 						}
 					}
-					
+
 					log.Printf("🔹 %s: TLS Record: Type=%d (%s), Version=%s (0x%04x), Length=%d/%d",
 						label, recordType, getTLSRecordTypeName(recordType), versionStr, version, length, n)
-						
+
 					// Special handling for TLS 1.3 records with 0x0303 version field
 					// This is normal in TLS 1.3, which uses 0x0303 in the record layer for compatibility
 					if version == tls.VersionTLS12 {
@@ -88,9 +88,9 @@ func RelayData(source, destination net.Conn, buffer []byte, label string) {
 				log.Printf("❌ %s: Error writing: %v", label, err)
 				break
 			}
-			
+
 			totalBytes += int64(written)
-			
+
 			if written < n {
 				log.Printf("⚠️ %s: Short write: %d/%d bytes", label, written, n)
 			}
@@ -144,7 +144,7 @@ func RelayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 			// Check for session ticket in the TLS records
 			if tls.IsSessionTicketMessage(buffer[:n]) {
 				log.Printf("🎫 %s: Detected NewSessionTicket message (%d bytes)", label, n)
-				
+
 				// Check if we have a handler for this
 				if processData != nil {
 					processData(buffer[:n])
@@ -153,7 +153,7 @@ func RelayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 				recordType, version, length, err := tls.ParseTLSRecordHeader(buffer[:n])
 				if err == nil && recordType >= tls.RecordTypeChangeCipherSpec && recordType <= tls.RecordTypeHeartbeat {
 					expectedLen := int(length) + 5 // record header (5 bytes) + payload length
-					
+
 					// Enhanced version logging with human-readable format
 					versionStr := "Unknown"
 					if version == tls.VersionTLS12 {
@@ -168,19 +168,19 @@ func RelayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 
 					log.Printf("🔹 %s: TLS Record: Type=%d (%s), Version=%s (0x%04x), Length=%d/%d",
 						label, recordType, getTLSRecordTypeName(recordType), versionStr, version, length, n)
-					
+
 					// CRITICAL: Verify we have a complete TLS record
 					if n < expectedLen {
-						log.Printf("⚠️ %s: Incomplete TLS record: got %d bytes, expected %d", 
+						log.Printf("⚠️ %s: Incomplete TLS record: got %d bytes, expected %d",
 							label, n, expectedLen)
-						
+
 						// Handshake records are often split
 						if recordType == tls.RecordTypeHandshake {
 							log.Printf("ℹ️ %s: Handshake record may be split across multiple TCP segments (normal)", label)
 						}
 					}
 				}
-				
+
 				// Call the optional data processor if provided
 				if processData != nil {
 					processData(buffer[:n])
@@ -193,15 +193,15 @@ func RelayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 				log.Printf("❌ %s: Error writing: %v", label, err)
 				break
 			}
-			
+
 			totalBytes += int64(written)
-			
+
 			if written < n {
 				log.Printf("⚠️ %s: Short write: %d/%d bytes", label, written, n)
 			}
 		}
 	}
-	
+
 	log.Printf("✅ %s: Relay complete, total bytes transferred: %d", label, totalBytes)
 }
 
@@ -209,7 +209,7 @@ func RelayDataWithSessionTicketDetection(src, dst net.Conn, buffer []byte, label
 func BiRelayData(conn1, conn2 net.Conn, label1, label2 string) {
 	buffer1 := make([]byte, 32768)
 	buffer2 := make([]byte, 32768)
-	
+
 	go RelayData(conn1, conn2, buffer1, label1)
 	go RelayData(conn2, conn1, buffer2, label2)
 }
@@ -218,7 +218,59 @@ func BiRelayData(conn1, conn2 net.Conn, label1, label2 string) {
 func BiRelayDataWithTicketDetection(conn1, conn2 net.Conn, label1, label2 string, processor func([]byte)) {
 	buffer1 := make([]byte, 32768)
 	buffer2 := make([]byte, 32768)
-	
+
 	go RelayDataWithSessionTicketDetection(conn1, conn2, buffer1, label1, nil)
 	go RelayDataWithSessionTicketDetection(conn2, conn1, buffer2, label2, processor)
+}
+
+// SimpleRelayConnections provides a direct bidirectional relay between two connections
+// This uses io.Copy for maximum efficiency and correct handling of TLS record boundaries
+func SimpleRelayConnections(clientConn, targetConn net.Conn) {
+	// Use a channel to coordinate shutdown
+	done := make(chan bool, 2)
+
+	// Client to target
+	go func() {
+		// We need a large buffer for TLS handshakes with big certificates
+		buf := make([]byte, 65536)
+
+		// Create a buffered copy for better performance with TLS
+		_, err := io.CopyBuffer(targetConn, clientConn, buf)
+		if err != nil && err != io.EOF {
+			log.Printf("❌ Error in client→target relay: %v", err)
+		}
+
+		// Signal completion and close connection
+		done <- true
+	}()
+
+	// Target to client
+	go func() {
+		// We need a large buffer for TLS handshakes with big certificates
+		buf := make([]byte, 65536)
+
+		// Create a buffered copy for better performance with TLS
+		_, err := io.CopyBuffer(clientConn, targetConn, buf)
+		if err != nil && err != io.EOF {
+			log.Printf("❌ Error in target→client relay: %v", err)
+		}
+
+		// Signal completion and close connection
+		done <- true
+	}()
+
+	// Wait for both goroutines to finish
+	<-done
+
+	// Ensure both connections are closed
+	clientConn.Close()
+	targetConn.Close()
+
+	// Drain the channel
+	select {
+	case <-done:
+	default:
+	}
+
+	log.Printf("✅ Connection relay completed")
 }

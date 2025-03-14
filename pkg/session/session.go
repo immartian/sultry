@@ -15,8 +15,8 @@ type SessionTicket struct {
 
 var (
 	// Store session tickets by hostname
-	sessionTickets     = make(map[string]*SessionTicket)
-	sessionTicketsMu   sync.RWMutex
+	sessionTickets   = make(map[string]*SessionTicket)
+	sessionTicketsMu sync.RWMutex
 )
 
 // StoreSessionTicket stores a session ticket for a given hostname
@@ -46,18 +46,18 @@ func StoreSessionTicket(hostname string, data []byte) {
 func HasValidSessionTicket(targetServer string) (bool, []byte) {
 	sessionTicketsMu.RLock()
 	defer sessionTicketsMu.RUnlock()
-	
+
 	ticket, exists := sessionTickets[targetServer]
 	if !exists || ticket == nil || len(ticket.Data) == 0 {
 		return false, nil
 	}
-	
+
 	// Check if the ticket has expired (24 hours)
 	if time.Since(ticket.Timestamp) > 24*time.Hour {
 		log.Printf("⚠️ Session ticket for %s has expired", targetServer)
 		return false, nil
 	}
-	
+
 	log.Printf("✅ Found valid session ticket for %s (%d bytes, age: %s)",
 		targetServer, len(ticket.Data), time.Since(ticket.Timestamp))
 	return true, ticket.Data
