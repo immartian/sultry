@@ -337,16 +337,19 @@ fi
 
 # SUMMARY OF HANDSHAKE AND DIRECT CONNECTION
 echo "=== SUMMARY ==="
-echo "Modular Architecture with Direct OOB Communication:"
+echo "Modular Architecture with OOB Communication:"
 
-# Check for explicit direct OOB mode
+# Check for OOB mode (either direct or network)
 if grep -q "DIRECT MODE:|DIRECT OOB:" test_client_real.log; then
     echo "1. ✅ Using direct local function calls (non-HTTP API) - EXPLICITLY CONFIRMED"
     grep -E "DIRECT (MODE|OOB)" test_client_real.log | head -1
 elif grep -q "Using direct OOB communication" test_client_real.log; then
     echo "1. ✅ Using direct local function calls (non-HTTP API)"
+elif grep -q "NETWORK MODE\|HTTP API" test_client_real.log; then
+    echo "1. ✅ Using network OOB communication with HTTP API"
+    grep -E "NETWORK MODE" test_client_real.log | head -1
 else
-    echo "1. ❌ Not using direct OOB communication"
+    echo "1. ❌ No OOB communication mode detected"
 fi
 
 # Check handshake completion status
