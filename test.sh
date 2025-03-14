@@ -79,7 +79,7 @@ fi
 
 # Start client with explicit logging
 echo "=== Starting client component ==="
-./bin/sultry -mode=dual -local 127.0.0.1:7008 > test_client.log 2>&1 &
+./bin/sultry -mode=client -direct-oob -local 127.0.0.1:7008 -remote 127.0.0.1:9009 > test_client.log 2>&1 &
 CLIENT_PID=$!
 echo "Client started with PID: $CLIENT_PID"
 
